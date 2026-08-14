@@ -1,0 +1,11 @@
+[package]
+name = "gridscript"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand_chacha = "0.10.0"
+thiserror = "2.0.20"
+rand = "0.10.2"
+strum_macros = "0.28.0"
+strum = "0.28.0"
