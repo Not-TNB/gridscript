@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use crate::error::{GridScriptError, Result};
 use crate::parser::ast::{Node, Checkpoint, DebugMode, RawMetadata};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Metadata {
     pub width: i32,         // required
     pub height: i32,        // required
@@ -14,7 +14,7 @@ pub struct Metadata {
     pub seed: Option<u64>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scope {
     pub title: String,
     pub metadata: Metadata,
@@ -28,8 +28,6 @@ pub struct Program {
     pub subroutines: HashMap<String, Scope>,
     pub max_depth: u32,
 }
-
-/* Helpers for Metadata::from_raw */
 
 fn require_positive(raw: Option<i64>, key: &str) -> Result<i32> {
     let value = raw.ok_or_else(|| GridScriptError::MissingMetadata(key.into()))?;
@@ -76,5 +74,21 @@ impl Metadata {
             steps, debug,
             seed,
         })
+    }
+}
+
+fn positive_u32_or_default(raw: Option<i64>, key: &str, default: u32) -> Result<u32> {
+    match raw {
+        None => Ok(default),
+        Some(value) => u32::try_from(value)
+            .ok()
+            .filter(|&n| n >= 1)
+            .ok_or(GridScriptError::InvalidMetadata { key: key.into(), value }),
+    }
+}
+
+impl Program {
+    pub fn max_depth_from_raw(raw: Option<i64>) -> Result<u32> {
+        positive_u32_or_default(raw, "maxdepth", 1000)
     }
 }

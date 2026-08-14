@@ -1,15 +1,16 @@
 pub mod ast;
 pub mod lexer;
 
+use std::collections::HashMap;
 use crate::error::{GridScriptError as Error, Result};
 use crate::parser::ast::{
     ArithOp, Command, DebugMode, GoTarget, GotoTarget,
     PrintTarget, RawMetadata, StoreSource, SwitchCond, ToClause,
     ValueExpr, RemoveFrom, MoveMode, Position, Node,
-    Checkpoint,
+    Checkpoint
 };
 use crate::parser::lexer::{Keyword, Token};
-use crate::program::Program;
+use crate::program::{Metadata, Program, Scope};
 use crate::types::{DataType, Value};
 
 /* ---------------------------------------------------------------------------------------------
@@ -585,10 +586,10 @@ impl<'a> Parser<'a> {
 }
 
 /* ---------------------------------------------------------------------------------------------
- * NODE/CHECKPOINT LINE PARSING
+ * NODE/CHECKPOINT (BODY) LINE PARSING
  * --------------------------------------------------------------------------------------------- */
 
-enum NodeOrCheckpoint {
+enum BodyLine {
     Node(Node),
     Checkpoint(Checkpoint),
 }
@@ -613,7 +614,7 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses `(x,y):COMMAND|(CHECKPOINT id)`
-    fn parse_node_line(&mut self) -> Result<NodeOrCheckpoint> {
+    fn parse_body_line(&mut self) -> Result<BodyLine> {
         let position = self.parse_position()?;
         self.expect_token(Token::Colon)?;
 
@@ -622,22 +623,123 @@ impl<'a> Parser<'a> {
             if id < 0 {
                 return Err(Error::InvalidCheckpointId(id));
             }
-            Ok(NodeOrCheckpoint::Checkpoint(Checkpoint { position, id }))
+            Ok(BodyLine::Checkpoint(Checkpoint { position, id }))
         } else {
             let command = self.parse_command()?;
-            Ok(NodeOrCheckpoint::Node(Node { position, command }))
+            Ok(BodyLine::Node(Node { position, command }))
         }
     }
 }
 
+/* ---------------------------------------------------------------------------------------------
+ * SCOPE ASSEMBLY AND SPLITTER
+ * --------------------------------------------------------------------------------------------- */
+
+impl<'a> Parser<'a> {
+    /// Parses the node body
+    fn parse_body(&mut self) -> Result<(Vec<Node>, Vec<Checkpoint>)> {
+        let mut nodes = Vec::new(); let mut checkpoints = Vec::new();
+
+        self.skip_newlines();
+        while !self.at_end() {
+            match self.parse_body_line()? {
+                BodyLine::Node(n) => nodes.push(n),
+                BodyLine::Checkpoint(c) => checkpoints.push(c),
+            }
+            self.skip_newlines();
+        }
+
+        Ok((nodes, checkpoints))
+    }
+}
+
+/// Parses one scope: a title line, a metadata blcok and a node body
+fn parse_scope(source: &str, octothorpes: usize) -> Result<(Scope, Option<i64>)> {
+    let (title, rest) = split_title(source, octothorpes)?;
+    let title = title.to_string();
+
+    let tokens = lexer::tokenize(rest)?;
+    let mut parser = Parser::new(&tokens);
+
+    let raw = parser.parse_metadata()?;
+    let max_depth = raw.max_depth;
+    let metadata = Metadata::from_raw(raw)?;
+
+    let (nodes, checkpoints) = parser.parse_body()?;
+
+    // exactly one START
+    match nodes.iter().filter(|n| n.command == Command::Start).count() {
+        0 => return Err(Error::MissingStart(title)),
+        1 => (),
+        _ => return Err(Error::DuplicateStart(title)),
+    };
+
+    // bounds checker
+    let in_bounds = |p: Position| {
+        p.x >= 1 && p.x <= metadata.width && p.y >= 1 && p.y <= metadata.height
+    };
+
+    // nodes and checkpoints are bounded
+    if let Some(n) = nodes.iter()
+        .find(|n| !in_bounds(n.position)) {
+        return Err(Error::NodeCenterOutOfBounds { x: n.position.x, y: n.position.y });
+    }
+    if let Some(c) = checkpoints.iter()
+        .find(|c| !in_bounds(c.position)) {
+        return Err(Error::CheckpointCenterOutOfBounds { x: c.position.x, y: c.position.y });
+    }
+
+    Ok((Scope {title: title.to_string(), metadata, nodes, checkpoints}, max_depth))
+}
+
+/// Splits `source` into the main program and subroutines
+fn split_scopes(source: &str) -> (&str, Vec<&str>) {
+    let mut cuts = Vec::new();
+    let mut offset = 0;
+
+    for line in source.split_inclusive('\n') {
+        if line.trim_start().starts_with("##") {
+            cuts.push(offset);
+        }
+        offset += line.len();
+    }
+
+    let main_end = cuts.first().copied().unwrap_or(source.len());
+    let main = &source[..main_end];
+
+    let subs = cuts
+        .iter()
+        .enumerate()
+        .map(|(i, &start)| {
+            let end = cuts.get(i + 1).copied().unwrap_or(source.len());
+            &source[start..end]
+        })
+        .collect();
+
+    (main, subs)
+}
 
 /* ---------------------------------------------------------------------------------------------
  * MAIN PARSER
  * --------------------------------------------------------------------------------------------- */
 
 /// Parses a full GridScript source file into a `Program`.
-pub fn parse(_source: &str) -> Result<Program> {
-    todo!("implement parser")
+pub fn parse(source: &str) -> Result<Program> {
+    let (main_src, sub_srcs) = split_scopes(source);
+    let (main, max_depth_raw) = parse_scope(main_src, 1)?;
+
+    let mut subroutines = HashMap::new();
+    for src in sub_srcs {
+        let (scope, _) = parse_scope(src, 2)?;
+        let title = scope.title.clone();
+        if subroutines.insert(title.clone(), scope).is_some() {
+            return Err(Error::DuplicateSubroutine(title));
+        }
+    }
+
+    let max_depth = Program::max_depth_from_raw(max_depth_raw)?;
+
+    Ok(Program { main, subroutines, max_depth })
 }
 
 #[cfg(test)]
@@ -1001,8 +1103,8 @@ mod tests {
     #[test]
     fn parses_node_lines() {
         let tokens = lexer::tokenize("(3,1):PRINT 'hi'").unwrap();
-        match Parser::new(&tokens).parse_node_line().unwrap() {
-            NodeOrCheckpoint::Node(n) => {
+        match Parser::new(&tokens).parse_body_line().unwrap() {
+            BodyLine::Node(n) => {
                 assert_eq!(n.position, Position { x: 3, y: 1 });
                 assert_eq!(n.command, Command::Print(PrintTarget::Value(str_lit("hi"))));
             }
@@ -1010,8 +1112,8 @@ mod tests {
         }
 
         let tokens = lexer::tokenize("(7,1):CHECKPOINT 0").unwrap();
-        match Parser::new(&tokens).parse_node_line().unwrap() {
-            NodeOrCheckpoint::Checkpoint(c) => {
+        match Parser::new(&tokens).parse_body_line().unwrap() {
+            BodyLine::Checkpoint(c) => {
                 assert_eq!(c.position, Position { x: 7, y: 1 });
                 assert_eq!(c.id, 0);
             }
@@ -1024,7 +1126,7 @@ mod tests {
         let bad = ["3,1:PRINT", "(3 1):PRINT", "(3,1) PRINT", "(3,1):CHECKPOINT -1"];
         for source in bad {
             let tokens = lexer::tokenize(source).unwrap();
-            assert!(Parser::new(&tokens).parse_node_line().is_err());
+            assert!(Parser::new(&tokens).parse_body_line().is_err());
         }
     }
 }

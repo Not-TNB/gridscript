@@ -38,7 +38,7 @@ impl GridScriptRng {
     /// pick a random index in [0,len).
     /// Panics if `len == 0`.
     pub fn random_index(&mut self, len: usize) -> usize {
-        self.inner.random_range(0..len) as usize
+        self.inner.random_range(0..len)
     }
 
     /// SHUFFLE; rearrange buffer in place (Fisher–Yates)

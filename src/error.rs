@@ -10,11 +10,17 @@ pub enum GridScriptError {
     #[error("node centered at ({x},{y}) is out of bounds")]
     NodeCenterOutOfBounds { x: i32, y: i32 },
 
+    #[error("checkpoint centered at ({x},{y}) is out of bounds")]
+    CheckpointCenterOutOfBounds { x: i32, y: i32 },
+
     #[error("no START node found in {0}")]
     MissingStart(String),
 
     #[error("more than one START node found in {0}")]
     DuplicateStart(String),
+
+    #[error("multiple subroutines found with the name {0}")]
+    DuplicateSubroutine(String),
 
     #[error("checkpoint id must be a non-negative integer, got {0}")]
     InvalidCheckpointId(i64),

@@ -91,3 +91,9 @@ impl DataTracer {
         self.col = 0;
     }
 }
+
+impl Default for DataTracer {
+    fn default() -> Self {
+        Self::new()
+    }
+}

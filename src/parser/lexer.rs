@@ -37,11 +37,10 @@ fn scan_number(chars: &mut Peekable<Chars>) -> Result<Token> {
     let mut buffer = String::new();
     let mut seen_dot = false;
 
-    if let Some(&c) = chars.peek() {
-        if c == '-' || c == '+' {
-            buffer.push(c);
-            chars.next();
-        }
+    if let Some(&c) = chars.peek()
+        && (c == '-' || c == '+') {
+        buffer.push(c);
+        chars.next();
     }
 
     while let Some(&c) = chars.peek() {
