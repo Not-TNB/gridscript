@@ -5,7 +5,8 @@ use crate::error::{GridScriptError as Error, Result};
 use crate::parser::ast::{
     ArithOp, Command, DebugMode, GoTarget, GotoTarget,
     PrintTarget, RawMetadata, StoreSource, SwitchCond, ToClause,
-    ValueExpr, RemoveFrom, MoveMode,
+    ValueExpr, RemoveFrom, MoveMode, Position, Node,
+    Checkpoint,
 };
 use crate::parser::lexer::{Keyword, Token};
 use crate::program::Program;
@@ -66,6 +67,30 @@ impl<'a> Parser<'a> {
             Ok(())
         } else {
             Err(Error::syntax(format!("expected {kw:?}, found {:?}", self.peek())))
+        }
+    }
+
+    /// Reads one integer literal, widening it to `i64`.
+    fn expect_int(&mut self) -> Result<i64> {
+        match self.peek() {
+            Some(Token::IntLiteral(n)) => {
+                let n = *n as i64;
+                self.advance();
+                Ok(n)
+            }
+            other => Err(Error::syntax(format!(
+                "expected an integer, found {other:?}"
+            ))),
+        }
+    }
+
+    /// Consumes the given token, erroring if it isn't there.
+    fn expect_token(&mut self, expected: Token) -> Result<()> {
+        if self.peek() == Some(&expected) {
+            self.advance();
+            Ok(())
+        } else {
+            Err(Error::syntax(format!("expected {expected:?}, found {:?}", self.peek())))
         }
     }
 
@@ -139,20 +164,6 @@ fn split_title(source: &str, octothorpes: usize) -> Result<(&str, &str)> {
  * --------------------------------------------------------------------------------------------- */
 
 impl<'a> Parser<'a> {
-    /// Reads one integer literal associated with a key, widening it to `i64`.
-    fn expect_int(&mut self, key: &str) -> Result<i64> {
-        match self.peek() {
-            Some(Token::IntLiteral(n)) => {
-                let n = *n as i64;
-                self.advance();
-                Ok(n)
-            }
-            other => Err(Error::syntax(format!(
-                "metadata key '{key}' expects an integer value, found {other:?}"
-            ))),
-        }
-    }
-
     /// Reads one `true`/`false`/`auto` value associated with `@debug`.
     fn expect_debug_mode(&mut self) -> Result<DebugMode> {
         let mode = match self.peek() {
@@ -180,22 +191,16 @@ impl<'a> Parser<'a> {
         };
         self.advance();
 
-        macro_rules! int_key {
-            ($field:ident) => {{
-                raw.$field = Some(self.expect_int(&key)?);
-            }};
-        }
-
         match key.as_str() {
-            "width"      => int_key!(width),
-            "height"     => int_key!(height),
-            "datawidth"  => int_key!(data_width),
-            "dataheight" => int_key!(data_height),
-            "radius"     => int_key!(radius),
-            "steps"      => int_key!(steps),
-            "maxdepth"   => int_key!(max_depth),
-            "seed"  => raw.seed = Some(self.expect_int("seed")? as u64),
-            "debug" => raw.debug = Some(self.expect_debug_mode()?),
+            "width"      => raw.width       = Some(self.expect_int()?),
+            "height"     => raw.height      = Some(self.expect_int()?),
+            "datawidth"  => raw.data_width  = Some(self.expect_int()?),
+            "dataheight" => raw.data_height = Some(self.expect_int()?),
+            "radius"     => raw.radius      = Some(self.expect_int()?),
+            "steps"      => raw.steps       = Some(self.expect_int()?),
+            "maxdepth"   => raw.max_depth   = Some(self.expect_int()?),
+            "seed"       => raw.seed        = Some(self.expect_int()? as u64),
+            "debug"      => raw.debug       = Some(self.expect_debug_mode()?),
             _ => return Err(Error::syntax(format!("unknown metadata key '{key}'"))),
         }
 
@@ -580,6 +585,53 @@ impl<'a> Parser<'a> {
 }
 
 /* ---------------------------------------------------------------------------------------------
+ * NODE/CHECKPOINT LINE PARSING
+ * --------------------------------------------------------------------------------------------- */
+
+enum NodeOrCheckpoint {
+    Node(Node),
+    Checkpoint(Checkpoint),
+}
+
+impl<'a> Parser<'a> {
+    /// Parses a coordinate, errors if out of i32 range
+    fn expect_coord(&mut self) -> Result<i32> {
+        let n = self.expect_int()?;
+        i32::try_from(n).map_err(|_| Error::syntax(format!(
+            "coordinate {n} is out of range"
+        )))
+    }
+
+    /// Parses `(x,y)` into a position
+    fn parse_position(&mut self) -> Result<Position> {
+        self.expect_token(Token::LParen)?;
+        let x = self.expect_coord()?;
+        self.expect_token(Token::Comma)?;
+        let y = self.expect_coord()?;
+        self.expect_token(Token::RParen)?;
+        Ok(Position { x, y })
+    }
+
+    /// Parses `(x,y):COMMAND|(CHECKPOINT id)`
+    fn parse_node_line(&mut self) -> Result<NodeOrCheckpoint> {
+        let position = self.parse_position()?;
+        self.expect_token(Token::Colon)?;
+
+        if self.eat_keyword(Keyword::Checkpoint) {
+            let id = self.expect_int()?;
+            if id < 0 {
+                return Err(Error::InvalidCheckpointId(id));
+            }
+            Ok(NodeOrCheckpoint::Checkpoint(Checkpoint { position, id }))
+        } else {
+            let command = self.parse_command()?;
+            Ok(NodeOrCheckpoint::Node(Node { position, command }))
+        }
+    }
+}
+
+
+/* ---------------------------------------------------------------------------------------------
  * MAIN PARSER
  * --------------------------------------------------------------------------------------------- */
 
@@ -944,5 +996,35 @@ mod tests {
             name: "FOO".into(), arguments: vec![var("x")], giving: None,
         });
         assert_eq!(p.peek(), Some(&Token::Newline));
+    }
+
+    #[test]
+    fn parses_node_lines() {
+        let tokens = lexer::tokenize("(3,1):PRINT 'hi'").unwrap();
+        match Parser::new(&tokens).parse_node_line().unwrap() {
+            NodeOrCheckpoint::Node(n) => {
+                assert_eq!(n.position, Position { x: 3, y: 1 });
+                assert_eq!(n.command, Command::Print(PrintTarget::Value(str_lit("hi"))));
+            }
+            _ => panic!("expected a node"),
+        }
+
+        let tokens = lexer::tokenize("(7,1):CHECKPOINT 0").unwrap();
+        match Parser::new(&tokens).parse_node_line().unwrap() {
+            NodeOrCheckpoint::Checkpoint(c) => {
+                assert_eq!(c.position, Position { x: 7, y: 1 });
+                assert_eq!(c.id, 0);
+            }
+            _ => panic!("expected a checkpoint"),
+        }
+    }
+
+    #[test]
+    fn rejects_bad_node_lines() {
+        let bad = ["3,1:PRINT", "(3 1):PRINT", "(3,1) PRINT", "(3,1):CHECKPOINT -1"];
+        for source in bad {
+            let tokens = lexer::tokenize(source).unwrap();
+            assert!(Parser::new(&tokens).parse_node_line().is_err());
+        }
     }
 }
