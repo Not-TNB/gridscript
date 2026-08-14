@@ -11,15 +11,20 @@ pub enum Value {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum DataType {
-    Int, Float, Str, Bool,
+    Int,
+    Float,
+    Str,
+    Bool,
 }
 
 /// Typecasts value to bool
 fn cast_to_bool(value: &Value) -> bool {
     match value {
-        Value::Int(0) => false, Value::Int(_) => true,
+        Value::Int(0) => false,
+        Value::Int(_) => true,
         Value::Float(f) => *f != 0.0,
-        Value::Str(s) if s.is_empty() || s == b"0" => false, Value::Str(_) => true,
+        Value::Str(s) if s.is_empty() || s == b"0" => false,
+        Value::Str(_) => true,
         Value::Bool(b) => *b,
         Value::Null => false,
     }
@@ -30,13 +35,7 @@ fn cast_to_float(value: &Value) -> Option<f32> {
     Some(match value {
         Value::Int(i) => *i as f32,
         Value::Float(f) => *f,
-        Value::Str(s) => {
-            std::str::from_utf8(s)
-                .ok()?
-                .trim()
-                .parse::<f32>()
-                .ok()?
-        },
+        Value::Str(s) => std::str::from_utf8(s).ok()?.trim().parse::<f32>().ok()?,
         Value::Bool(true) => 1.0,
         Value::Null | Value::Bool(false) => 0.0,
     })
@@ -53,7 +52,8 @@ fn cast_to_string(value: &Value) -> Vec<u8> {
         Value::Int(i) => i.to_string().into_bytes(),
         Value::Float(f) => f.to_string().into_bytes(),
         Value::Str(s) => s.clone(),
-        Value::Bool(true) => b"TRUE".to_vec(), Value::Bool(false) => b"FALSE".to_vec(),
+        Value::Bool(true) => b"TRUE".to_vec(),
+        Value::Bool(false) => b"FALSE".to_vec(),
         Value::Null => Vec::new(),
     }
 }
@@ -61,10 +61,10 @@ fn cast_to_string(value: &Value) -> Vec<u8> {
 impl Value {
     pub fn cast_to(&self, target: DataType) -> Option<Self> {
         Some(match target {
-            DataType::Int   => Value::Int(cast_to_int(self)?),
+            DataType::Int => Value::Int(cast_to_int(self)?),
             DataType::Float => Value::Float(cast_to_float(self)?),
-            DataType::Str   => Value::Str(cast_to_string(self)),
-            DataType::Bool  => Value::Bool(cast_to_bool(self)),
+            DataType::Str => Value::Str(cast_to_string(self)),
+            DataType::Bool => Value::Bool(cast_to_bool(self)),
         })
     }
 }

@@ -108,7 +108,7 @@ RANDOM: Has a 50% chance of rotating the program tracer's direction 90 degrees c
 **STORE value|RANDOM [TO variable]**
 Stores the specified value to the specified variable, if applicable. Else, stores it at the current dataspace value. If RANDOM is used, a random floating point number between 0 and 1 (including 0, but not 1) is used. The variable name may contain any combination of lowercase letters, underscores, and digits, of which the first character may not be a digit.
 
-**INPUT [type] [variable] [WITH PROMPT prompt]**
+**INPUT [type] [TO variable] [WITH PROMPT prompt]**
 Takes a value from the input, storing it to the specified variable if applicable, or else at the current position in the Dataspace. If a prompt is specified, it will send that message to the input and use the response as the value stored. If *type* is specified, it will check to see if the data is or can be cast to the specified type before storing; if not, it throws a warning and stores NULL instead. *Type* may be either INT, STRING, FLOAT, or BOOL. Should return NULL on end of file.
 
 When used in a subroutine, prompt is ignored and it takes values from the subroutine call's argument list, consumed in order (each INPUT call consumes the next not-yet-consumed argument). The same type-check-and-cast rule applies as above — if the argument is not or cannot be cast to the requested type, a warning is thrown and NULL is stored instead. An exception is thrown if a subroutine attempts to take more inputs than the argument list gives it.

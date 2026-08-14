@@ -1,0 +1,12 @@
+#TRUTH MACHINE 2.
+
+@width 8
+@height 8
+
+(1,1):START
+(3,1):INPUT
+(5,1):SWITCH =1
+(5,3):CHECKPOINT 0
+(5,5):PRINT 1
+(5,7):GOTO 0
+(7,1):PRINT 0

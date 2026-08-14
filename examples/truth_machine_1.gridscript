@@ -1,0 +1,13 @@
+#TRUTH MACHINE.
+
+@width 10
+@height 6
+
+(1,1):START
+(3,1):INPUT INT
+(5,1):GO EAST
+(7,1):SWITCH =1
+(7,3):PRINT 1
+(7,5):GO WEST
+(5,5):GO NORTH
+(9,1):PRINT 0

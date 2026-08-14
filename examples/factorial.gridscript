@@ -1,0 +1,15 @@
+#FACTORIAL.
+
+@width 14
+@height 8
+
+(1,3):START
+(7,1):CHECKPOINT 0
+(3,3):INPUT INT TO n
+(5,3):STORE n
+(7,3):GO EAST
+(9,3):DECREMENT n
+(11,3):SWITCH n
+(11,5):MULTIPLY BY n
+(11,7):GOTO 0
+(13,3):PRINT

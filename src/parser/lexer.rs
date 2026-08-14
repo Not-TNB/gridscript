@@ -1,7 +1,7 @@
+use crate::error::{GridScriptError as Error, Result};
 use std::iter::Peekable;
 use std::str::{Chars, FromStr};
 use strum_macros::EnumString;
-use crate::error::{GridScriptError as Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
@@ -11,26 +11,81 @@ pub enum Token {
     IntLiteral(i32),
     FloatLiteral(f32),
     StringLiteral(Vec<u8>),
-    Newline, Comma, Colon, LParen, RParen,
-    At, Equals, Bang, BangEquals
+    Newline,
+    Comma,
+    Colon,
+    LParen,
+    RParen,
+    At,
+    Equals,
+    Bang,
+    BangEquals,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum Keyword {
-    Start, Go, North, South, East, West, Random,
-    Relative, To, This, Direction,
-    Checkpoint, Goto, Switch,
-    Store, Input, With, Prompt, Load, File,
-    Next, Previous, Value, Row,
-    Print, Newline, Image,
-    Push, Remove, Position, Top, Any, Peek, Home,
-    Move, Last, Node, By,
-    Increment, Decrement, Giving, Multiply, Divide,
-    Shuffle, Call, Arguments, Split, Over,
-    Throw, Warn, Return,
-    The, Variable, Named,
-    Int, Float, #[strum(serialize = "STRING")] Str, Bool, True, False,
+    Start,
+    Go,
+    North,
+    South,
+    East,
+    West,
+    Random,
+    Relative,
+    To,
+    This,
+    Direction,
+    Checkpoint,
+    Goto,
+    Switch,
+    Store,
+    Input,
+    With,
+    Prompt,
+    Load,
+    File,
+    Next,
+    Previous,
+    Value,
+    Row,
+    Print,
+    Newline,
+    Image,
+    Push,
+    Remove,
+    Position,
+    Top,
+    Any,
+    Peek,
+    Home,
+    Move,
+    Last,
+    Node,
+    By,
+    Increment,
+    Decrement,
+    Giving,
+    Multiply,
+    Divide,
+    Shuffle,
+    Call,
+    Arguments,
+    Split,
+    Over,
+    Throw,
+    Warn,
+    Return,
+    The,
+    Variable,
+    Named,
+    Int,
+    Float,
+    #[strum(serialize = "STRING")]
+    Str,
+    Bool,
+    True,
+    False,
 }
 
 fn scan_number(chars: &mut Peekable<Chars>) -> Result<Token> {
@@ -38,7 +93,8 @@ fn scan_number(chars: &mut Peekable<Chars>) -> Result<Token> {
     let mut seen_dot = false;
 
     if let Some(&c) = chars.peek()
-        && (c == '-' || c == '+') {
+        && (c == '-' || c == '+')
+    {
         buffer.push(c);
         chars.next();
     }
@@ -56,18 +112,18 @@ fn scan_number(chars: &mut Peekable<Chars>) -> Result<Token> {
         }
     }
 
-    if seen_dot { // float
-        buffer.parse::<f32>()
+    if seen_dot {
+        // float
+        buffer
+            .parse::<f32>()
             .map(Token::FloatLiteral)
-            .map_err(|_| Error::syntax(format!(
-                "invalid float literal '{buffer}'"
-            )))
-    } else { // int
-        buffer.parse::<i32>()
+            .map_err(|_| Error::syntax(format!("invalid float literal '{buffer}'")))
+    } else {
+        // int
+        buffer
+            .parse::<i32>()
             .map(Token::IntLiteral)
-            .map_err(|_| Error::syntax(format!(
-                "invalid int literal '{buffer}'"
-            )))
+            .map_err(|_| Error::syntax(format!("invalid int literal '{buffer}'")))
     }
 }
 
@@ -87,7 +143,9 @@ fn scan_word(chars: &mut Peekable<Chars>) -> Result<Token> {
         return Ok(Token::Keyword(kw));
     }
 
-    let starts_with_digit = buffer.chars().next()
+    let starts_with_digit = buffer
+        .chars()
+        .next()
         .map(|c| c.is_ascii_digit())
         .unwrap_or(false);
 
@@ -119,9 +177,7 @@ fn scan_string(chars: &mut Peekable<Chars>) -> Result<Token> {
         match chars.next() {
             Some('\'') => break, // closing quote
             Some(c) => buffer.push(c),
-            None => return Err(Error::syntax(String::from(
-                "unterminated string literal"
-            ))),
+            None => return Err(Error::syntax(String::from("unterminated string literal"))),
         }
     }
 
@@ -133,12 +189,17 @@ fn scan_bang(chars: &mut Peekable<Chars>) -> Option<Token> {
     match chars.peek() {
         Some('!') => {
             while let Some(&c) = chars.peek() {
-                if c == '\n' { break; }
+                if c == '\n' {
+                    break;
+                }
                 chars.next();
             }
             None
         }
-        Some('=') => { chars.next(); Some(Token::BangEquals) }
+        Some('=') => {
+            chars.next();
+            Some(Token::BangEquals)
+        }
         _ => Some(Token::Bang),
     }
 }
@@ -149,16 +210,45 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
 
     while let Some(&c) = chars.peek() {
         match c {
-            ' ' | '\t' | '\r' => { chars.next(); }
-            '\n' => { tokens.push(Token::Newline); chars.next(); }
-            ','  => { tokens.push(Token::Comma); chars.next(); }
-            ':'  => { tokens.push(Token::Colon); chars.next(); }
-            '('  => { tokens.push(Token::LParen); chars.next(); }
-            ')'  => { tokens.push(Token::RParen); chars.next(); }
-            '@'  => { tokens.push(Token::At); chars.next(); }
-            '='  => { tokens.push(Token::Equals); chars.next(); }
-            '\'' => { tokens.push(scan_string(&mut chars)?); }
-            '!' => { if let Some(t) = scan_bang(&mut chars) { tokens.push(t); } }
+            ' ' | '\t' | '\r' => {
+                chars.next();
+            }
+            '\n' => {
+                tokens.push(Token::Newline);
+                chars.next();
+            }
+            ',' => {
+                tokens.push(Token::Comma);
+                chars.next();
+            }
+            ':' => {
+                tokens.push(Token::Colon);
+                chars.next();
+            }
+            '(' => {
+                tokens.push(Token::LParen);
+                chars.next();
+            }
+            ')' => {
+                tokens.push(Token::RParen);
+                chars.next();
+            }
+            '@' => {
+                tokens.push(Token::At);
+                chars.next();
+            }
+            '=' => {
+                tokens.push(Token::Equals);
+                chars.next();
+            }
+            '\'' => {
+                tokens.push(scan_string(&mut chars)?);
+            }
+            '!' => {
+                if let Some(t) = scan_bang(&mut chars) {
+                    tokens.push(t);
+                }
+            }
             _ if c.is_ascii_digit() || c == '-' || c == '+' => {
                 tokens.push(scan_number(&mut chars)?);
             }
@@ -189,16 +279,19 @@ mod tests {
     #[test]
     fn tokenizes_hello_world() {
         let tokens = tokenize("(3,1):PRINT 'Hello World'").unwrap();
-        assert_eq!(tokens, vec![
-            Token::LParen,
-            Token::IntLiteral(3),
-            Token::Comma,
-            Token::IntLiteral(1),
-            Token::RParen,
-            Token::Colon,
-            Token::Keyword(Keyword::Print),
-            Token::StringLiteral(b"Hello World".to_vec()),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::LParen,
+                Token::IntLiteral(3),
+                Token::Comma,
+                Token::IntLiteral(1),
+                Token::RParen,
+                Token::Colon,
+                Token::Keyword(Keyword::Print),
+                Token::StringLiteral(b"Hello World".to_vec()),
+            ]
+        );
     }
 
     #[test]
@@ -217,10 +310,13 @@ mod tests {
     #[test]
     fn tokenizes_identifier_vs_keyword() {
         let tokens = tokenize("STORE x").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Keyword(Keyword::Store),
-            Token::Identifier("x".to_string()),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Keyword(Keyword::Store),
+                Token::Identifier("x".to_string()),
+            ]
+        );
     }
 
     #[test]
@@ -242,10 +338,10 @@ mod tests {
     #[test]
     fn digit_then_letter_is_two_tokens() {
         let tokens = tokenize("5x").unwrap();
-        assert_eq!(tokens, vec![
-            Token::IntLiteral(5),
-            Token::Identifier("x".to_string()),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![Token::IntLiteral(5), Token::Identifier("x".to_string()),]
+        );
     }
 
     #[test]
@@ -256,37 +352,55 @@ mod tests {
     #[test]
     fn newline_produces_token() {
         let tokens = tokenize("GO\nHOME").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Keyword(Keyword::Go),
-            Token::Newline,
-            Token::Keyword(Keyword::Home),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Keyword(Keyword::Go),
+                Token::Newline,
+                Token::Keyword(Keyword::Home),
+            ]
+        );
     }
 
     #[test]
     fn strips_comments() {
         let tokens = tokenize("HOME !! ignored\nHOME").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Keyword(Keyword::Home),
-            Token::Newline,
-            Token::Keyword(Keyword::Home),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Keyword(Keyword::Home),
+                Token::Newline,
+                Token::Keyword(Keyword::Home),
+            ]
+        );
     }
 
     #[test]
     fn lexer_switch_operators() {
-        assert_eq!(tokenize("!5").unwrap(), vec![Token::Bang, Token::IntLiteral(5)]);
-        assert_eq!(tokenize("=5").unwrap(), vec![Token::Equals, Token::IntLiteral(5)]);
-        assert_eq!(tokenize("!=5").unwrap(), vec![Token::BangEquals, Token::IntLiteral(5)]);
+        assert_eq!(
+            tokenize("!5").unwrap(),
+            vec![Token::Bang, Token::IntLiteral(5)]
+        );
+        assert_eq!(
+            tokenize("=5").unwrap(),
+            vec![Token::Equals, Token::IntLiteral(5)]
+        );
+        assert_eq!(
+            tokenize("!=5").unwrap(),
+            vec![Token::BangEquals, Token::IntLiteral(5)]
+        );
     }
 
     #[test]
     fn handles_windows_line_endings() {
         let tokens = tokenize("GO\r\nHOME").unwrap();
-        assert_eq!(tokens, vec![
-            Token::Keyword(Keyword::Go),
-            Token::Newline,
-            Token::Keyword(Keyword::Home),
-        ]);
+        assert_eq!(
+            tokens,
+            vec![
+                Token::Keyword(Keyword::Go),
+                Token::Newline,
+                Token::Keyword(Keyword::Home),
+            ]
+        );
     }
 }

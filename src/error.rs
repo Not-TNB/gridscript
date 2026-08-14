@@ -1,5 +1,5 @@
+use crate::types::{DataType, Value};
 use thiserror::Error;
-use crate::types::{Value, DataType};
 
 /// Fatal errors which halt execution
 #[derive(Debug, Error, Clone, PartialEq)]
@@ -31,13 +31,21 @@ pub enum GridScriptError {
     #[error("division by zero")]
     DivisionByZero,
 
-    #[error("subroutine '{name}' requested more inputs than its \
-    {given} argument(s) provide")]
+    #[error(
+        "subroutine '{name}' requested more inputs than its \
+    {given} argument(s) provide"
+    )]
     TooFewArguments { name: String, given: usize },
 
-    #[error("subroutine '{name}' called with {given} argument(s) but only \
-    consumed {consumed} via INPUT")]
-    TooManyArguments { name: String, given: usize, consumed: usize },
+    #[error(
+        "subroutine '{name}' called with {given} argument(s) but only \
+    consumed {consumed} via INPUT"
+    )]
+    TooManyArguments {
+        name: String,
+        given: usize,
+        consumed: usize,
+    },
 
     #[error("maximum call depth ({0}) exceeded")]
     MaxDepthExceeded(u32),

@@ -9,13 +9,14 @@ pub struct GridScriptRng {
 
 impl GridScriptRng {
     pub fn from_seed(seed: u64) -> Self {
-        GridScriptRng { inner: ChaCha8Rng::seed_from_u64(seed) }
+        GridScriptRng {
+            inner: ChaCha8Rng::seed_from_u64(seed),
+        }
     }
 
     pub fn from_entropy() -> Self {
         GridScriptRng {
-            inner: ChaCha8Rng::try_from_rng(&mut SysRng)
-                .expect("failed to seed from OS entropy"),
+            inner: ChaCha8Rng::try_from_rng(&mut SysRng).expect("failed to seed from OS entropy"),
         }
     }
 

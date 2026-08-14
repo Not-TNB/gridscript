@@ -1,0 +1,45 @@
+#WORD PROCESSOR.
+
+@width 30
+@height 10
+@maxdepth 10
+
+(1,1):START
+(3,1):INPUT STRING TO text
+(5,1):SPLIT text
+(7,1):CHECKPOINT 0
+(9,1):REMOVE TOP TO STRING word
+(11,1):SWITCH word
+(11,3):CALL CLASSIFY WITH ARGUMENTS word GIVING label
+(13,1):PRINT label
+(15,1):STORE RANDOM TO r
+(17,1):SWITCH THE VARIABLE NAMED 'r'
+(17,3):SHUFFLE
+(19,1):GO RELATIVE TO 5
+(21,1):GOTO 0
+(23,1):PEEK TO INT leftover
+(25,1):WARN 'buffer not fully drained'
+(27,1):PRINT NEWLINE
+
+##CLASSIFY.
+
+@width 20
+@height 6
+
+(1,1):START
+(3,1):INPUT STRING TO w
+(5,1):STORE 0 TO len
+(7,1):CHECKPOINT 1
+(9,1):SWITCH w
+(9,3):THROW 'empty word reached unexpectedly'
+(11,1):CALL COUNT_LEN WITH ARGUMENTS w GIVING len
+(13,1):RETURN len
+
+##COUNT_LEN.
+
+@width 16
+@height 4
+
+(1,1):START
+(3,1):INPUT STRING TO s
+(5,1):RETURN s

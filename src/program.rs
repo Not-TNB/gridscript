@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::error::{GridScriptError, Result};
-use crate::parser::ast::{Node, Checkpoint, DebugMode, RawMetadata};
+use crate::parser::ast::{Checkpoint, DebugMode, Node, RawMetadata};
+use std::collections::HashMap;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub struct Metadata {
@@ -32,7 +32,10 @@ pub struct Program {
 fn require_positive(raw: Option<i64>, key: &str) -> Result<i32> {
     let value = raw.ok_or_else(|| GridScriptError::MissingMetadata(key.into()))?;
     if value < 1 {
-        return Err(GridScriptError::InvalidMetadata { key: key.into(), value });
+        return Err(GridScriptError::InvalidMetadata {
+            key: key.into(),
+            value,
+        });
     }
     Ok(value as i32)
 }
@@ -41,7 +44,8 @@ fn positive_or_default(raw: Option<i64>, key: &str, default: i32) -> Result<i32>
     match raw {
         None => Ok(default),
         Some(value) if value < 1 => Err(GridScriptError::InvalidMetadata {
-            key: key.into(), value,
+            key: key.into(),
+            value,
         }),
         Some(value) => Ok(value as i32),
     }
@@ -59,7 +63,10 @@ impl Metadata {
         let steps = match raw.steps {
             None => None,
             Some(value) if value < 1 => {
-                return Err(GridScriptError::InvalidMetadata { key: "steps".into(), value });
+                return Err(GridScriptError::InvalidMetadata {
+                    key: "steps".into(),
+                    value,
+                });
             }
             Some(value) => Some(value as u64),
         };
@@ -69,9 +76,13 @@ impl Metadata {
         let seed = raw.seed;
 
         Ok(Self {
-            width, height,
-            data_width, data_height, radius,
-            steps, debug,
+            width,
+            height,
+            data_width,
+            data_height,
+            radius,
+            steps,
+            debug,
             seed,
         })
     }
@@ -80,15 +91,67 @@ impl Metadata {
 fn positive_u32_or_default(raw: Option<i64>, key: &str, default: u32) -> Result<u32> {
     match raw {
         None => Ok(default),
-        Some(value) => u32::try_from(value)
-            .ok()
-            .filter(|&n| n >= 1)
-            .ok_or(GridScriptError::InvalidMetadata { key: key.into(), value }),
+        Some(value) => {
+            u32::try_from(value)
+                .ok()
+                .filter(|&n| n >= 1)
+                .ok_or(GridScriptError::InvalidMetadata {
+                    key: key.into(),
+                    value,
+                })
+        }
     }
 }
 
 impl Program {
     pub fn max_depth_from_raw(raw: Option<i64>) -> Result<u32> {
         positive_u32_or_default(raw, "maxdepth", 1000)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn defaults_to_1000_when_absent() {
+        assert_eq!(Program::max_depth_from_raw(None).unwrap(), 1000);
+    }
+
+    #[test]
+    fn accepts_valid_values() {
+        assert_eq!(Program::max_depth_from_raw(Some(1)).unwrap(), 1);
+        assert_eq!(Program::max_depth_from_raw(Some(50)).unwrap(), 50);
+        assert_eq!(
+            Program::max_depth_from_raw(Some(1_000_000)).unwrap(),
+            1_000_000
+        );
+    }
+
+    #[test]
+    fn rejects_zero() {
+        assert!(Program::max_depth_from_raw(Some(0)).is_err());
+    }
+
+    #[test]
+    fn rejects_negative() {
+        assert!(Program::max_depth_from_raw(Some(-5)).is_err());
+    }
+
+    #[test]
+    fn rejects_values_beyond_u32_range() {
+        // i64 value that doesn't fit in u32
+        assert!(Program::max_depth_from_raw(Some(i64::from(u32::MAX) + 1)).is_err());
+    }
+
+    #[test]
+    fn error_reports_the_offending_value() {
+        match Program::max_depth_from_raw(Some(-5)) {
+            Err(GridScriptError::InvalidMetadata { key, value }) => {
+                assert_eq!(key, "maxdepth");
+                assert_eq!(value, -5);
+            }
+            other => panic!("expected InvalidMetadata, got {other:?}"),
+        }
     }
 }

@@ -1,4 +1,4 @@
-use crate::types::{Value, DataType};
+use crate::types::{DataType, Value};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Position {
@@ -7,7 +7,11 @@ pub struct Position {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DebugMode { True, False, Auto }
+pub enum DebugMode {
+    True,
+    False,
+    Auto,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Checkpoint {
@@ -41,7 +45,7 @@ pub enum ValueExpr {
     DynamicVar {
         name: Box<ValueExpr>,
         cast: Option<DataType>,
-    }
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -51,12 +55,21 @@ pub enum GotoTarget {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum ArithOp { Increment, Decrement, Multiply, Divide }
+pub enum ArithOp {
+    Increment,
+    Decrement,
+    Multiply,
+    Divide,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GoTarget {
-    North, South, East, West,
-    Random, ThisDirection,
+    North,
+    South,
+    East,
+    West,
+    Random,
+    ThisDirection,
     Value(ValueExpr),
 }
 
@@ -100,7 +113,10 @@ pub enum RemoveFrom {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MoveMode { To, By }
+pub enum MoveMode {
+    To,
+    By,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Command {
@@ -121,23 +137,43 @@ pub enum Command {
     },
     Push(Option<ValueExpr>),
     Goto(GotoTarget),
-    Go { target: GoTarget, relative: bool },
+    Go {
+        target: GoTarget,
+        relative: bool,
+    },
     Switch(SwitchCond),
-    Store { source: StoreSource, target: Option<ValueExpr> },
+    Store {
+        source: StoreSource,
+        target: Option<ValueExpr>,
+    },
     Peek(Option<ToClause>),
-    Split { value: ValueExpr, over: Option<ValueExpr> },
+    Split {
+        value: ValueExpr,
+        over: Option<ValueExpr>,
+    },
     Return(Option<ValueExpr>),
     Print(PrintTarget),
-    Remove { from: RemoveFrom, to: Option<ToClause> },
-    LoadFile { path: ValueExpr, to: Option<ToClause> },
-    MoveLastNode { 
-        mode: MoveMode, 
-        x: ValueExpr, 
-        y: ValueExpr 
+    Remove {
+        from: RemoveFrom,
+        to: Option<ToClause>,
     },
-    Call { 
-        name: String, 
-        arguments: Vec<ValueExpr>, 
-        giving: Option<ValueExpr> 
+    LoadFile {
+        path: ValueExpr,
+        to: Option<ToClause>,
+    },
+    MoveLastNode {
+        mode: MoveMode,
+        x: ValueExpr,
+        y: ValueExpr,
+    },
+    Call {
+        name: String,
+        arguments: Vec<ValueExpr>,
+        giving: Option<ValueExpr>,
+    },
+    Input {
+        cast: Option<DataType>,
+        target: Option<ValueExpr>,
+        prompt: Option<ValueExpr>,
     },
 }

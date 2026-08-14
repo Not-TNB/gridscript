@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use crate::interpreter::tracer::DataTracer;
 use crate::types::Value;
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {
@@ -17,14 +17,17 @@ impl State {
     pub fn new(width: usize, height: usize) -> Self {
         Self {
             dataspace: vec![0; width * height],
-            width, height,
+            width,
+            height,
             data_tracer: DataTracer::new(),
             buffer: Vec::new(),
             variables: HashMap::new(),
         }
     }
 
-    fn idx(&self) -> usize { self.data_tracer.row * self.width + self.data_tracer.col }
+    fn idx(&self) -> usize {
+        self.data_tracer.row * self.width + self.data_tracer.col
+    }
     pub fn current_cell(&self) -> i32 {
         self.dataspace[self.idx()]
     }
@@ -67,7 +70,9 @@ impl State {
     }
     /// REMOVE; remove and return buffer bottom
     pub fn remove_bottom(&mut self) -> Option<Value> {
-        if self.buffer.is_empty() { return None }
+        if self.buffer.is_empty() {
+            return None;
+        }
         Some(self.buffer.remove(0))
     }
     /// REMOVE TOP; remove and return buffer top
@@ -76,7 +81,9 @@ impl State {
     }
     /// REMOVE position / REMOVE THIS position; remove and return value at given index in buffer
     pub fn remove_at(&mut self, index: usize) -> Option<Value> {
-        if self.buffer.len() <= index { return None }
+        if self.buffer.len() <= index {
+            return None;
+        }
         Some(self.buffer.remove(index))
     }
     /// PEEK; return copy of buffer bottom without removing

@@ -1,4 +1,4 @@
-use crate::error::{Result};
+use crate::error::Result;
 use crate::program::Program;
 use crate::rng::GridScriptRng;
 

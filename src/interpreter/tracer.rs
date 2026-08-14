@@ -2,13 +2,18 @@ pub type Point = (f32, f32);
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ProgramTracer {
-    pub x: f32, pub y: f32,
-    pub direction: u16 // in degrees, kept in [0,359]
+    pub x: f32,
+    pub y: f32,
+    pub direction: u16, // in degrees, kept in [0,359]
 }
 
 impl ProgramTracer {
     pub fn new(pos: Point) -> Self {
-        Self { x: pos.0, y: pos.1, direction: 0 }
+        Self {
+            x: pos.0,
+            y: pos.1,
+            direction: 0,
+        }
     }
 
     /// One step: advance by one unit in current direction.
@@ -16,7 +21,8 @@ impl ProgramTracer {
     pub fn advance(&mut self) -> (Point, Point) {
         let start: Point = (self.x, self.y);
         let rad: f32 = (self.direction as f32).to_radians();
-        self.x += rad.cos(); self.y += rad.sin();
+        self.x += rad.cos();
+        self.y += rad.sin();
         (start, (self.x, self.y))
     }
 
