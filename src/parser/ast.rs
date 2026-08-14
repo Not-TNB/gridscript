@@ -76,6 +76,33 @@ pub enum StoreSource {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub struct ToClause {
+    pub cast: Option<DataType>,
+    pub target: ValueExpr,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum PrintTarget {
+    DataCell, // bare print
+    Newline,
+    Image(ValueExpr),
+    File(ValueExpr),
+    Value(ValueExpr),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum RemoveFrom {
+    Bottom, // bare REMOVE
+    Top,
+    AnyPosition,
+    ThisPosition,
+    Position(ValueExpr),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MoveMode { To, By }
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Command {
     Start,
     Home,
@@ -86,18 +113,31 @@ pub enum Command {
     PreviousRow,
     Throw(ValueExpr),
     Warn(ValueExpr),
-    Push(Option<ValueExpr>),
-    Goto(GotoTarget),
     Arithmetic {
         op: ArithOp,
         target: Option<ValueExpr>,
         by: Option<ValueExpr>,
         giving: Option<ValueExpr>,
     },
+    Push(Option<ValueExpr>),
+    Goto(GotoTarget),
     Go { target: GoTarget, relative: bool },
     Switch(SwitchCond),
-    Store {
-        source: StoreSource,
-        target: Option<ValueExpr>,
-    }
+    Store { source: StoreSource, target: Option<ValueExpr> },
+    Peek(Option<ToClause>),
+    Split { value: ValueExpr, over: Option<ValueExpr> },
+    Return(Option<ValueExpr>),
+    Print(PrintTarget),
+    Remove { from: RemoveFrom, to: Option<ToClause> },
+    LoadFile { path: ValueExpr, to: Option<ToClause> },
+    MoveLastNode { 
+        mode: MoveMode, 
+        x: ValueExpr, 
+        y: ValueExpr 
+    },
+    Call { 
+        name: String, 
+        arguments: Vec<ValueExpr>, 
+        giving: Option<ValueExpr> 
+    },
 }

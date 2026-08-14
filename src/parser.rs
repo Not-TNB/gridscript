@@ -4,14 +4,15 @@ pub mod lexer;
 use crate::error::{GridScriptError as Error, Result};
 use crate::parser::ast::{
     ArithOp, Command, DebugMode, GoTarget, GotoTarget,
-    RawMetadata, StoreSource, SwitchCond, ValueExpr
+    PrintTarget, RawMetadata, StoreSource, SwitchCond, ToClause,
+    ValueExpr, RemoveFrom, MoveMode,
 };
 use crate::parser::lexer::{Keyword, Token};
 use crate::program::Program;
 use crate::types::{DataType, Value};
 
 /* ---------------------------------------------------------------------------------------------
- * PARSER STRUCT
+ * PARSER STRUCT AND PRIMITIVES
  * --------------------------------------------------------------------------------------------- */
 
 struct Parser<'a> {
@@ -20,33 +21,34 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn new(tokens: &'a [Token]) -> Self {
-        Parser { tokens, pos: 0 }
-    }
+    fn new(tokens: &'a [Token]) -> Self { Parser { tokens, pos: 0 } }
 
     /// The token at the cursor, if any.
-    fn peek(&self) -> Option<&Token> {
-        self.tokens.get(self.pos)
-    }
+    fn peek(&self) -> Option<&Token> { self.tokens.get(self.pos) }
 
     /// The token `n` positions ahead of the cursor, if any.
-    fn peek_at(&self, n: usize) -> Option<&Token> {
-        self.tokens.get(self.pos + n)
-    }
+    fn peek_at(&self, n: usize) -> Option<&Token> { self.tokens.get(self.pos + n) }
 
     /// Moves the cursor forward one token.
-    fn advance(&mut self) {
-        self.pos += 1;
-    }
+    fn advance(&mut self) { self.pos += 1; }
 
     /// True if the cursor is past the last token.
-    fn at_end(&self) -> bool {
-        self.pos >= self.tokens.len()
-    }
+    fn at_end(&self) -> bool { self.pos >= self.tokens.len() }
+
+    /// True if the cursor is at a newline or past the end.
+    fn at_line_end(&self) -> bool { matches!(self.peek(), None | Some(Token::Newline)) }
 
     /// The keyword at the cursor, if there is one.
     fn keyword(&self) -> Option<Keyword> {
         match self.peek() {
+            Some(Token::Keyword(k)) => Some(*k),
+            _ => None,
+        }
+    }
+
+    /// The keyword `n` positions ahead of the cursor, if there is one.
+    fn keyword_at(&self, n: usize) -> Option<Keyword> {
+        match self.peek_at(n) {
             Some(Token::Keyword(k)) => Some(*k),
             _ => None,
         }
@@ -72,49 +74,36 @@ impl<'a> Parser<'a> {
         if self.at_keyword(kw) {
             self.advance();
             true
-        } else { false }
+        } else {
+            false
+        }
+    }
+
+    /// Advances past any newlines at the cursor.
+    fn skip_newlines(&mut self) {
+        while matches!(self.peek(), Some(Token::Newline)) { self.advance(); }
+    }
+
+    /// Consumes a type keyword if the cursor is at one.
+    fn eat_data_type(&mut self) -> Option<DataType> {
+        let ty = match self.keyword() {
+            Some(Keyword::Int) => DataType::Int,
+            Some(Keyword::Float) => DataType::Float,
+            Some(Keyword::Str) => DataType::Str,
+            Some(Keyword::Bool) => DataType::Bool,
+            _ => return None,
+        };
+        self.advance();
+        Some(ty)
     }
 }
 
 /* ---------------------------------------------------------------------------------------------
- * GENERAL HELPERS AND HELPERS FOR METADATA / VALUE_EXPR PARSING
+ * SOURCE PREPROCESSING
  * --------------------------------------------------------------------------------------------- */
 
-/// The keyword at the front of `tokens`, if there is one.
-fn keyword(tokens: &[Token]) -> Option<Keyword> {
-    match tokens.first() {
-        Some(Token::Keyword(k)) => Some(*k),
-        _ => None,
-    }
-}
-
-/// True if `tokens` starts with the given keyword.
-fn at_keyword(tokens: &[Token], kw: Keyword) -> bool {
-    keyword(tokens) == Some(kw)
-}
-
-/// If `tokens` starts with `kw`, consumes it and parses the following value expression.
-/// Consumes nothing otherwise.
-fn parse_optional_clause(tokens: &[Token], kw: Keyword) -> Result<(Option<ValueExpr>, &[Token])> {
-    if at_keyword(tokens, kw) {
-        let (expr, rest) = parse_value_expr(&tokens[1..])?;
-        Ok((Some(expr), rest))
-    } else {
-        Ok((None, tokens))
-    }
-}
-
-/// Advances past any leading `Newline` tokens.
-fn skip_newlines(tokens: &[Token]) -> &[Token] {
-    let mut rest = tokens;
-    while matches!(rest.first(), Some(Token::Newline)) {
-        rest = &rest[1..];
-    }
-    rest
-}
-
-/// Splits a leading title line (`#TITLE.` or `##TITLE.`) off the front of
-/// `source`, returning the title text and the remaining source.
+/// Splits a leading title line (`#TITLE.` or `##TITLE.`) off the front of `source`,
+/// returning the title text and the remaining source.
 fn split_title(source: &str, octothorpes: usize) -> Result<(&str, &str)> {
     let (line, rest) = match source.split_once('\n') {
         Some((line, rest)) => (line, rest),
@@ -145,325 +134,448 @@ fn split_title(source: &str, octothorpes: usize) -> Result<(&str, &str)> {
     Ok((title.trim(), rest))
 }
 
-/// Reads one integer literal associated with a key, widening it to `i64`.
-fn expect_int<'a>(tokens: &'a [Token], key: &str) -> Result<(i64, &'a [Token])> {
-    match tokens.first() {
-        Some(Token::IntLiteral(n)) => Ok((*n as i64, &tokens[1..])),
-        other => Err(Error::syntax(format!(
-            "metadata key '{key}' expects an integer value, found {other:?}"
-        ))),
-    }
-}
+/* ---------------------------------------------------------------------------------------------
+ * METADATA PARSING
+ * --------------------------------------------------------------------------------------------- */
 
-/// Reads one `true`/`false`/`auto` value associated with `@debug`.
-fn expect_debug_mode(tokens: &[Token]) -> Result<(DebugMode, &[Token])> {
-    let mode = match tokens.first() {
-        Some(Token::Identifier(s)) if s == "true"  => DebugMode::True,
-        Some(Token::Identifier(s)) if s == "false" => DebugMode::False,
-        Some(Token::Identifier(s)) if s == "auto"  => DebugMode::Auto,
-        other => return Err(Error::syntax(format!(
-            "metadata key 'debug' expects true, false, or auto, found {other:?}"
-        ))),
-    };
-    Ok((mode, &tokens[1..]))
-}
-
-/// Parses a single `@key value` line into `raw`, returning the remaining tokens.
-/// PRE: `tokens` starts with `Token::At`
-fn parse_metadata_line<'a>(raw: &mut RawMetadata, tokens: &'a [Token]) -> Result<&'a [Token]> {
-    let mut rest = &tokens[1..]; // consume @
-
-    // read key
-    let key = match rest.first() {
-        Some(Token::Identifier(name)) => name.clone(),
-        other => return Err(Error::syntax(format!(
-            "expected an identifier, found '{:?}'", other
-        ))),
-    };
-
-    rest = &rest[1..]; // consume key
-
-    macro_rules! int_key {
-        ($field:ident) => {{
-            let (v, r) = expect_int(rest, &key)?;
-            raw.$field = Some(v); r
-        }};
-    }
-
-    // consume value based on key
-    rest = match key.as_str() {
-        "width"      => int_key!(width),
-        "height"     => int_key!(height),
-        "datawidth"  => int_key!(data_width),
-        "dataheight" => int_key!(data_height),
-        "radius"     => int_key!(radius),
-        "steps"      => int_key!(steps),
-        "maxdepth"   => int_key!(max_depth),
-        "seed" => {
-            let (v, r) = expect_int(rest, "seed")?;
-            raw.seed = Some(v as u64); r
-        },
-        "debug" => {
-            let (v, r) = expect_debug_mode(rest)?;
-            raw.debug = Some(v); r
+impl<'a> Parser<'a> {
+    /// Reads one integer literal associated with a key, widening it to `i64`.
+    fn expect_int(&mut self, key: &str) -> Result<i64> {
+        match self.peek() {
+            Some(Token::IntLiteral(n)) => {
+                let n = *n as i64;
+                self.advance();
+                Ok(n)
+            }
+            other => Err(Error::syntax(format!(
+                "metadata key '{key}' expects an integer value, found {other:?}"
+            ))),
         }
-        _ => return Err(Error::syntax(format!("unknown metadata key '{key}'"))),
-    };
-
-    // check for newline
-    match rest.first() {
-        Some(Token::Newline) => rest = &rest[1..],
-        Some(other) => return Err(Error::syntax(format!(
-            "expected end of metadata line, found {other:?}"
-        ))),
-        None => (),
     }
 
-    Ok(rest)
-}
-
-/// Parses a single value expression of the form `THE _ NAMED _`
-/// PRE: `tokens` starts with `Token::Keyword(Keyword::The)`
-fn parse_dynamic_value_expr(tokens: &[Token]) -> Result<(ValueExpr, &[Token])> {
-    let mut rest = &tokens[1..];
-
-    let cast = match keyword(rest) {
-        Some(Keyword::Variable) => None,
-        Some(Keyword::Int)      => Some(DataType::Int),
-        Some(Keyword::Float)    => Some(DataType::Float),
-        Some(Keyword::Str)      => Some(DataType::Str),
-        Some(Keyword::Bool)     => Some(DataType::Bool),
-        _ => return Err(Error::syntax(format!(
-            "expected VARIABLE or a type after THE, found {:?}", rest.first()
-        ))),
-    };
-    rest = &rest[1..];
-
-    if !at_keyword(rest, Keyword::Named) {
-        return Err(Error::syntax(format!("expected NAMED, found {:?}", rest.first())));
+    /// Reads one `true`/`false`/`auto` value associated with `@debug`.
+    fn expect_debug_mode(&mut self) -> Result<DebugMode> {
+        let mode = match self.peek() {
+            Some(Token::Identifier(s)) if s == "true" => DebugMode::True,
+            Some(Token::Identifier(s)) if s == "false" => DebugMode::False,
+            Some(Token::Identifier(s)) if s == "auto" => DebugMode::Auto,
+            other => return Err(Error::syntax(format!(
+                "metadata key 'debug' expects true, false, or auto, found {other:?}"
+            ))),
+        };
+        self.advance();
+        Ok(mode)
     }
-    rest = &rest[1..];
 
-    let (name, rest) = parse_value_expr(rest)?;
+    /// Parses a single `@key value` line into `raw`.
+    /// PRE: the cursor is at `Token::At`
+    fn parse_metadata_line(&mut self, raw: &mut RawMetadata) -> Result<()> {
+        self.advance(); // consume @
 
-    Ok((ValueExpr::DynamicVar {name: Box::new(name), cast}, rest))
+        let key = match self.peek() {
+            Some(Token::Identifier(name)) => name.clone(),
+            other => return Err(Error::syntax(format!(
+                "expected a metadata key, found {other:?}"
+            ))),
+        };
+        self.advance();
+
+        macro_rules! int_key {
+            ($field:ident) => {{
+                raw.$field = Some(self.expect_int(&key)?);
+            }};
+        }
+
+        match key.as_str() {
+            "width"      => int_key!(width),
+            "height"     => int_key!(height),
+            "datawidth"  => int_key!(data_width),
+            "dataheight" => int_key!(data_height),
+            "radius"     => int_key!(radius),
+            "steps"      => int_key!(steps),
+            "maxdepth"   => int_key!(max_depth),
+            "seed"  => raw.seed = Some(self.expect_int("seed")? as u64),
+            "debug" => raw.debug = Some(self.expect_debug_mode()?),
+            _ => return Err(Error::syntax(format!("unknown metadata key '{key}'"))),
+        }
+
+        match self.peek() {
+            Some(Token::Newline) => self.advance(),
+            None => (),
+            other => return Err(Error::syntax(format!(
+                "expected end of metadata line, found {other:?}"
+            ))),
+        }
+
+        Ok(())
+    }
+
+    /// Parses the whole `@key value` metadata block.
+    fn parse_metadata(&mut self) -> Result<RawMetadata> {
+        self.skip_newlines();
+        let mut raw = RawMetadata::default();
+        while matches!(self.peek(), Some(Token::At)) {
+            self.parse_metadata_line(&mut raw)?;
+        }
+        Ok(raw)
+    }
 }
 
 /* ---------------------------------------------------------------------------------------------
- * HELPERS FOR COMMAND PARSING
+ * VALUE EXPRESSION PARSING
  * --------------------------------------------------------------------------------------------- */
 
-/// Parses either a `VALUE` or a `ROW`, producing a given command.
-fn parse_value_or_row(
-    tokens: &[Token], on_value: Command, on_row: Command,
-) -> Result<(Command, &[Token])> {
-    match keyword(&tokens[1..]) {
-        Some(Keyword::Value) => Ok((on_value, &tokens[2..])),
-        Some(Keyword::Row) => Ok((on_row, &tokens[2..])),
-        _ => Err(Error::syntax(format!(
-            "expected VALUE or ROW, found {:?}", tokens.get(1)
-        ))),
-    }
-}
-
-/// Parses `PUSH [value]`.
-/// PRE: `tokens` starts with `Token::Keyword(Keyword::Push)`
-fn parse_push(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    let rest = &tokens[1..];
-    match rest.first() {
-        None | Some(Token::Newline) => Ok((Command::Push(None), rest)),
-        _ => {
-            let (value, rest) = parse_value_expr(rest)?;
-            Ok((Command::Push(Some(value)), rest))
-        }
-    }
-}
-
-/// Parses `GOTO id|THIS CHECKPOINT`.
-/// PRE: `tokens` starts with `Token::Keyword(Keyword::Goto)`
-fn parse_goto(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    let rest = &tokens[1..];
-    if at_keyword(rest, Keyword::This) {
-        if at_keyword(&rest[1..], Keyword::Checkpoint) {
-            Ok((Command::Goto(GotoTarget::ThisCheckpoint), &rest[2..]))
+impl<'a> Parser<'a> {
+    /// Parses a value expression of the form `THE _ NAMED _`.
+    /// PRE: the cursor is at `Keyword::The`
+    fn parse_dynamic_value_expr(&mut self) -> Result<ValueExpr> {
+        self.advance(); // consume THE
+        let cast = if self.eat_keyword(Keyword::Variable) {
+            None
+        } else if let Some(ty) = self.eat_data_type() {
+            Some(ty)
         } else {
-            Err(Error::syntax(format!("expected CHECKPOINT, found {:?}", rest.get(1))))
-        }
-    } else {
-        let (id, rest) = parse_value_expr(rest)?;
-        Ok((Command::Goto(GotoTarget::Id(id)), rest))
-    }
-}
-
-/// Parses `INCREMENT|DECREMENT|MULTIPLY|DIVIDE [var] [BY value] [GIVING var]`.
-/// PRE: `tokens` starts with the operation keyword
-fn parse_arithmetic(tokens: &[Token], op: ArithOp) -> Result<(Command, &[Token])> {
-    let mut rest = &tokens[1..];
-
-    // optional target
-    let target = if at_keyword(rest, Keyword::By)
-        || at_keyword(rest, Keyword::Giving)
-        || matches!(rest.first(), None | Some(&Token::Newline))
-    { None } else {
-        let (expr, r) = parse_value_expr(rest)?; rest = r;
-        Some(expr)
-    };
-
-    let (by, rest) = parse_optional_clause(rest, Keyword::By)?;
-    let (giving, rest) = parse_optional_clause(rest, Keyword::Giving)?;
-
-    if by.is_none() && matches!(op, ArithOp::Multiply | ArithOp::Divide) {
-        return Err(Error::syntax(format!("{op:?} requires a BY clause")));
-    }
-
-    Ok((Command::Arithmetic { op, target, by, giving }, rest))
-}
-
-/// Parses `GO NORTH|SOUTH|EAST|WEST|RANDOM|[RELATIVE TO] THIS DIRECTION|[RELATIVE TO] value`.
-/// PRE: `tokens` starts with `Token::Keyword(Keyword::Go)`
-fn parse_go(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    let mut rest = &tokens[1..];
-
-    // optional RELATIVE TO
-    let relative = if at_keyword(rest, Keyword::Relative) {
-        if !at_keyword(&rest[1..], Keyword::To) {
             return Err(Error::syntax(format!(
-                "expected TO after RELATIVE, found {:?}", rest.get(1)
+                "expected VARIABLE or a type after THE, found {:?}", self.peek()
+            )));
+        };
+        self.expect_keyword(Keyword::Named)?;
+        let name = self.parse_value_expr()?;
+        Ok(ValueExpr::DynamicVar { name: Box::new(name), cast })
+    }
+
+    /// If the cursor is at `kw`, consumes it and parses the following value
+    /// expression. Consumes nothing otherwise.
+    fn parse_optional_clause(&mut self, kw: Keyword) -> Result<Option<ValueExpr>> {
+        if self.eat_keyword(kw) {
+            Ok(Some(self.parse_value_expr()?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    /// Parses one value expression: a literal, a variable reference, or a
+    /// dynamic `THE _ NAMED _` form.
+    fn parse_value_expr(&mut self) -> Result<ValueExpr> {
+        let expr = match self.peek() {
+            Some(Token::IntLiteral(n)) => ValueExpr::Literal(Value::Int(*n)),
+            Some(Token::FloatLiteral(f)) => ValueExpr::Literal(Value::Float(*f)),
+            Some(Token::StringLiteral(s)) => ValueExpr::Literal(Value::Str(s.clone())),
+            Some(Token::Keyword(Keyword::True)) => ValueExpr::Literal(Value::Bool(true)),
+            Some(Token::Keyword(Keyword::False)) => ValueExpr::Literal(Value::Bool(false)),
+            Some(Token::Identifier(name)) => ValueExpr::Var(name.clone()),
+            Some(Token::Keyword(Keyword::The)) => return self.parse_dynamic_value_expr(),
+            other => return Err(Error::syntax(format!(
+                "expected a value, found {other:?}"
+            ))),
+        };
+        self.advance();
+        Ok(expr)
+    }
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * COMMAND PARSING
+ * --------------------------------------------------------------------------------------------- */
+
+impl<'a> Parser<'a> {
+    /// Parses either a `VALUE` or a `ROW`, producing a given command.
+    /// PRE: the cursor is at `NEXT` or `PREVIOUS`
+    fn parse_value_or_row(&mut self, on_value: Command, on_row: Command) -> Result<Command> {
+        self.advance(); // consume NEXT/PREVIOUS
+        match self.keyword() {
+            Some(Keyword::Value) => { self.advance(); Ok(on_value) }
+            Some(Keyword::Row)   => { self.advance(); Ok(on_row) }
+            _ => Err(Error::syntax(format!(
+                "expected VALUE or ROW, found {:?}", self.peek()
+            ))),
+        }
+    }
+
+    /// Parses `PUSH [value]`.
+    fn parse_push(&mut self) -> Result<Command> {
+        self.advance(); // consume PUSH
+        Ok(Command::Push(
+            if self.at_line_end() { None }
+            else { Some(self.parse_value_expr()?) }
+        ))
+    }
+
+    /// Parses `GOTO id|THIS CHECKPOINT`.
+    fn parse_goto(&mut self) -> Result<Command> {
+        self.advance(); // consume GOTO
+        Ok(Command::Goto(
+            if self.eat_keyword(Keyword::This) {
+                self.expect_keyword(Keyword::Checkpoint)?;
+                GotoTarget::ThisCheckpoint
+            } else {
+                GotoTarget::Id(self.parse_value_expr()?)
+            }
+        ))
+    }
+
+    /// Parses `INCREMENT|DECREMENT|MULTIPLY|DIVIDE [var] [BY value] [GIVING var]`.
+    fn parse_arithmetic(&mut self, op: ArithOp) -> Result<Command> {
+        self.advance(); // consume the operator keyword
+
+        let target = if self.at_keyword(Keyword::By)
+            || self.at_keyword(Keyword::Giving)
+            || self.at_line_end()
+        { None } else {
+            Some(self.parse_value_expr()?)
+        };
+
+        let by = self.parse_optional_clause(Keyword::By)?;
+        let giving = self.parse_optional_clause(Keyword::Giving)?;
+
+        if by.is_none() && matches!(op, ArithOp::Multiply | ArithOp::Divide) {
+            return Err(Error::syntax(format!("{op:?} requires a BY clause")));
+        }
+
+        Ok(Command::Arithmetic { op, target, by, giving })
+    }
+
+    /// Parses `THROW message`.
+    fn parse_throw(&mut self) -> Result<Command> {
+        self.advance(); Ok(Command::Throw(self.parse_value_expr()?))
+    }
+
+    /// Parses `WARN message`.
+    fn parse_warn(&mut self) -> Result<Command> {
+        self.advance(); Ok(Command::Warn(self.parse_value_expr()?))
+    }
+
+    /// Parses `GO NORTH|SOUTH|EAST|WEST|RANDOM|[RELATIVE TO] THIS DIRECTION|[RELATIVE TO] value`.
+    fn parse_go(&mut self) -> Result<Command> {
+        self.advance(); // consume GO
+
+        let relative = if self.eat_keyword(Keyword::Relative) {
+            self.expect_keyword(Keyword::To)?;
+            true
+        } else {
+            false
+        };
+
+        let target = match self.keyword() {
+            Some(Keyword::North)  => { self.advance(); GoTarget::North }
+            Some(Keyword::South)  => { self.advance(); GoTarget::South }
+            Some(Keyword::East)   => { self.advance(); GoTarget::East }
+            Some(Keyword::West)   => { self.advance(); GoTarget::West }
+            Some(Keyword::Random) => { self.advance(); GoTarget::Random }
+            Some(Keyword::This) => {
+                self.advance();
+                self.expect_keyword(Keyword::Direction)?;
+                GoTarget::ThisDirection
+            }
+            _ => GoTarget::Value(self.parse_value_expr()?),
+        };
+
+        if relative && !matches!(target, GoTarget::ThisDirection | GoTarget::Value(_)) {
+            return Err(Error::syntax(format!(
+                "cannot make {target:?} a relative target"
             )));
         }
-        rest = &rest[2..]; true
-    } else { false };
 
-    // target: THIS DIRECTION, N/E/W/S, RANDOM
-    let (target, rest) = match keyword(rest) {
-        Some(Keyword::North)  => (GoTarget::North, &rest[1..]),
-        Some(Keyword::South)  => (GoTarget::South, &rest[1..]),
-        Some(Keyword::East)   => (GoTarget::East, &rest[1..]),
-        Some(Keyword::West)   => (GoTarget::West, &rest[1..]),
-        Some(Keyword::Random) => (GoTarget::Random, &rest[1..]),
-        Some(Keyword::This) => {
-            if at_keyword(&rest[1..], Keyword::Direction) {
-                (GoTarget::ThisDirection, &rest[2..])
-            } else {
-                return Err(Error::syntax(format!(
-                    "expected DIRECTION after THIS, found {:?}", rest.get(1)
-                )));
+        Ok(Command::Go { target, relative })
+    }
+
+    /// Parses `SWITCH RANDOM|value|!value|=value|!=value`.
+    fn parse_switch(&mut self) -> Result<Command> {
+        self.advance(); // consume SWITCH
+
+        if self.eat_keyword(Keyword::Random) {
+            return Ok(Command::Switch(SwitchCond::Random));
+        }
+
+        let build: fn(ValueExpr) -> SwitchCond = match self.peek() {
+            Some(Token::Bang)       => { self.advance(); SwitchCond::Falsy }
+            Some(Token::Equals)     => { self.advance(); SwitchCond::Equals }
+            Some(Token::BangEquals) => { self.advance(); SwitchCond::NotEquals }
+            _ => SwitchCond::Truthy,
+        };
+
+        Ok(Command::Switch(build(self.parse_value_expr()?)))
+    }
+
+    /// Parses `STORE value|RANDOM [TO variable]`.
+    fn parse_store(&mut self) -> Result<Command> {
+        self.advance(); // consume STORE
+
+        let source = if self.eat_keyword(Keyword::Random) {
+            StoreSource::Random
+        } else {
+            StoreSource::Value(self.parse_value_expr()?)
+        };
+
+        let target = self.parse_optional_clause(Keyword::To)?;
+        Ok(Command::Store { source, target })
+    }
+
+    /// Parses `TO [type] variable` clause.
+    fn parse_to_clause(&mut self) -> Result<Option<ToClause>> {
+        if !self.eat_keyword(Keyword::To) { return Ok(None); }
+        let cast = self.eat_data_type();
+        let target = self.parse_value_expr()?;
+        Ok(Some(ToClause { cast , target }))
+    }
+
+    /// Parses `PEEK [TO [type] VARIABLE]`.
+    fn parse_peek(&mut self) -> Result<Command> {
+        self.advance(); Ok(Command::Peek(self.parse_to_clause()?))
+    }
+
+    /// Parses `SPLIT string [OVER separator]`
+    fn parse_split(&mut self) -> Result<Command> {
+        self.advance(); // consume SPLIT
+        let value = self.parse_value_expr()?;
+        let over = self.parse_optional_clause(Keyword::Over)?;
+        Ok(Command::Split { value, over })
+    }
+
+    /// Parses `RETURN [value]`
+    fn parse_return(&mut self) -> Result<Command> {
+        self.advance(); // consume RETURN
+        Ok(Command::Return(
+            if self.at_line_end() { None }
+            else { Some(self.parse_value_expr()?) }
+        ))
+    }
+
+    /// Parses `PRINT [value|NEWLINE|IMAGE path|FILE path]`
+    fn parse_print(&mut self) -> Result<Command> {
+        self.advance(); // consume PRINT
+        Ok(Command::Print(
+            if self.at_line_end() { PrintTarget::DataCell }
+            else {
+                match self.keyword() {
+                    Some(Keyword::Newline) => { self.advance();
+                        PrintTarget::Newline
+                    }
+                    Some(Keyword::Image) => { self.advance();
+                        PrintTarget::Image(self.parse_value_expr()?)
+                    }
+                    Some(Keyword::File) => { self.advance();
+                        PrintTarget::File(self.parse_value_expr()?)
+                    }
+                    _ => PrintTarget::Value(self.parse_value_expr()?),
+                }
+            }
+        ))
+    }
+
+    /// Parses `REMOVE [position|THIS POSITION|TOP|ANY POSITION] [TO [type] variable]`
+    fn parse_remove(&mut self) -> Result<Command> {
+        self.advance(); // consume REMOVE
+        let from = match self.keyword() {
+            Some(Keyword::Top) => { self.advance();
+                RemoveFrom::Top
+            }
+            Some(Keyword::Any) => { self.advance();
+                self.expect_keyword(Keyword::Position)?;
+                RemoveFrom::AnyPosition
+            }
+            Some(Keyword::This) => { self.advance();
+                self.expect_keyword(Keyword::Position)?;
+                RemoveFrom::ThisPosition
+            }
+            _ if self.at_line_end() || self.at_keyword(Keyword::To) => RemoveFrom::Bottom,
+            _ => RemoveFrom::Position(self.parse_value_expr()?),
+        };
+        let to = self.parse_to_clause()?;
+        Ok(Command::Remove { from, to })
+    }
+
+    /// Parses `LOAD FILE path [TO [type] variable]`
+    fn parse_load_file(&mut self) -> Result<Command> {
+        self.advance();
+        self.expect_keyword(Keyword::File)?;
+        let path = self.parse_value_expr()?;
+        let to = self.parse_to_clause()?;
+        Ok(Command::LoadFile { path, to })
+    }
+
+    /// Parses `MOVE LAST NODE TO|BY x y`
+    fn parse_move_last_node(&mut self) -> Result<Command> {
+        self.advance();
+        self.expect_keyword(Keyword::Last)?;
+        self.expect_keyword(Keyword::Node)?;
+        let mode = if self.eat_keyword(Keyword::To) {
+            MoveMode::To
+        } else if self.eat_keyword(Keyword::By) {
+            MoveMode::By
+        } else {
+            return Err(Error::syntax(format!(
+                "expected TO or BY after MOVE LAST NODE, found {:?}", self.peek()
+            )));
+        };
+        let x = self.parse_value_expr()?;
+        let y = self.parse_value_expr()?;
+        Ok(Command::MoveLastNode { mode, x, y })
+    }
+
+    /// Parses `CALL name [WITH ARGUMENTS args] [GIVING variable]`
+    fn parse_call(&mut self) -> Result<Command> {
+        self.advance();
+        let name = match self.peek() {
+            Some(Token::UpperName(name)) => name.clone(),
+            Some(Token::Keyword(kw)) => return Err(Error::syntax(format!(
+                "subroutine name cannot be a reserved word: {kw:?}"
+            ))),
+            other => return Err(Error::syntax(format!(
+                "expected a subroutine name, found {other:?}"
+            ))),
+        };
+
+        self.advance();
+        let mut arguments: Vec<ValueExpr> = Vec::new();
+        if self.eat_keyword(Keyword::With) {
+            self.expect_keyword(Keyword::Arguments)?;
+            while !self.at_line_end() && !self.at_keyword(Keyword::Giving) {
+                arguments.push(self.parse_value_expr()?);
             }
         }
-        _ => { // fallback to value
-            let (expr, r) = parse_value_expr(rest)?;
-            (GoTarget::Value(expr), r)
+
+        let giving = self.parse_optional_clause(Keyword::Giving)?;
+
+        Ok(Command::Call { name, giving, arguments })
+    }
+
+    /// Parses one command.
+    fn parse_command(&mut self) -> Result<Command> {
+        match self.keyword() {
+            Some(Keyword::Start)   => { self.advance(); Ok(Command::Start) }
+            Some(Keyword::Home)    => { self.advance(); Ok(Command::Home) }
+            Some(Keyword::Shuffle) => { self.advance(); Ok(Command::Shuffle) }
+
+            Some(Keyword::Next) =>
+                self.parse_value_or_row(Command::NextValue, Command::NextRow),
+            Some(Keyword::Previous) =>
+                self.parse_value_or_row(Command::PreviousValue, Command::PreviousRow),
+
+            Some(Keyword::Increment) => self.parse_arithmetic(ArithOp::Increment),
+            Some(Keyword::Decrement) => self.parse_arithmetic(ArithOp::Decrement),
+            Some(Keyword::Multiply)  => self.parse_arithmetic(ArithOp::Multiply),
+            Some(Keyword::Divide)    => self.parse_arithmetic(ArithOp::Divide),
+            Some(Keyword::Throw)     => self.parse_throw(),
+            Some(Keyword::Warn)      => self.parse_warn(),
+            Some(Keyword::Push)      => self.parse_push(),
+            Some(Keyword::Goto)      => self.parse_goto(),
+            Some(Keyword::Go)        => self.parse_go(),
+            Some(Keyword::Switch)    => self.parse_switch(),
+            Some(Keyword::Store)     => self.parse_store(),
+            Some(Keyword::Peek)      => self.parse_peek(),
+            Some(Keyword::Split)     => self.parse_split(),
+            Some(Keyword::Return)    => self.parse_return(),
+            Some(Keyword::Print)     => self.parse_print(),
+            Some(Keyword::Remove)    => self.parse_remove(),
+            Some(Keyword::Load)      => self.parse_load_file(),
+            Some(Keyword::Move)      => self.parse_move_last_node(),
+            Some(Keyword::Call)      => self.parse_call(),
+
+            _ => Err(Error::syntax(format!(
+                "expected a command, found {:?}", self.peek()
+            ))),
         }
-    };
-
-    if relative && !matches!(target, GoTarget::ThisDirection | GoTarget::Value(_)) {
-        return Err(Error::syntax(format!(
-            "cannot make {:?} a relative target", target
-        )));
-    }
-
-    Ok((Command::Go { target, relative }, rest))
-}
-
-/// Parses `SWITCH RANDOM|value|!value|=value|!=value`.
-/// PRE: `tokens` starts with `Token::Keyword(Keyword::Switch)`
-fn parse_switch(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    let rest = &tokens[1..];
-
-    if at_keyword(rest, Keyword::Random) {
-        return Ok((Command::Switch(SwitchCond::Random), &rest[1..]));
-    }
-
-    let (build, rest): (fn(ValueExpr) -> SwitchCond, &[Token]) = match rest.first() {
-        Some(Token::Bang) => (SwitchCond::Falsy, &rest[1..]),
-        Some(Token::Equals) => (SwitchCond::Equals, &rest[1..]),
-        Some(Token::BangEquals) => (SwitchCond::NotEquals, &rest[1..]),
-        _ => (SwitchCond::Truthy, rest),
-    };
-
-    let (expr, rest) = parse_value_expr(rest)?;
-    Ok((Command::Switch(build(expr)), rest))
-}
-
-/// Parses `STORE value|RANDOM [TO variable]`.
-/// PRE: `tokens` startts with `Token::Keyword(Keyword::Store)`
-fn parse_store(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    let rest = &tokens[1..];
-
-    let (source, rest) = if at_keyword(rest, Keyword::Random) {
-        (StoreSource::Random, &rest[1..])
-    } else {
-        let (expr, rest) = parse_value_expr(rest)?;
-        (StoreSource::Value(expr), rest)
-    };
-
-    let (target, rest) = parse_optional_clause(rest, Keyword::To)?;
-    Ok((Command::Store { source, target }, rest))
-}
-
-/* ---------------------------------------------------------------------------------------------
- * PARSING COMPONENTS
- * --------------------------------------------------------------------------------------------- */
-
-/// Parses the whole `@key value` metadata block.
-fn parse_metadata(tokens: &[Token]) -> Result<(RawMetadata, &[Token])> {
-    let mut rest = skip_newlines(tokens);
-    let mut raw = RawMetadata::default();
-    while let Some(Token::At) = rest.first() {
-        rest = parse_metadata_line(&mut raw, rest)?;
-    }
-    Ok((raw, rest))
-}
-
-/// Parses one value expression (literal, variable reference or a dynamic `THE _ NAMED _` form)
-fn parse_value_expr(tokens: &[Token]) -> Result<(ValueExpr, &[Token])> {
-    let expr = match tokens.first() {
-        Some(Token::IntLiteral(n)) => ValueExpr::Literal(Value::Int(*n)),
-        Some(Token::FloatLiteral(f)) => ValueExpr::Literal(Value::Float(*f)),
-        Some(Token::StringLiteral(s)) => ValueExpr::Literal(Value::Str(s.clone())),
-        Some(Token::Keyword(Keyword::True)) => ValueExpr::Literal(Value::Bool(true)),
-        Some(Token::Keyword(Keyword::False)) => ValueExpr::Literal(Value::Bool(false)),
-        Some(Token::Identifier(name)) => ValueExpr::Var(name.clone()),
-        Some(Token::Keyword(Keyword::The)) => return parse_dynamic_value_expr(tokens),
-        other => return Err(Error::syntax(format!(
-            "expected a value, found {other:?}"
-        )))
-    };
-    Ok((expr, &tokens[1..]))
-}
-
-/// Parses one command
-fn parse_command(tokens: &[Token]) -> Result<(Command, &[Token])> {
-    match keyword(tokens) {
-        Some(Keyword::Start)   => Ok((Command::Start, &tokens[1..])),
-        Some(Keyword::Home)    => Ok((Command::Home, &tokens[1..])),
-        Some(Keyword::Shuffle) => Ok((Command::Shuffle, &tokens[1..])),
-
-        Some(Keyword::Next) =>
-            parse_value_or_row(tokens, Command::NextValue, Command::NextRow),
-        Some(Keyword::Previous) =>
-            parse_value_or_row(tokens, Command::PreviousValue, Command::PreviousRow),
-
-        Some(Keyword::Throw) => parse_value_expr(&tokens[1..])
-            .map(|(expr, rest)| (Command::Throw(expr), rest)),
-        Some(Keyword::Warn) => parse_value_expr(&tokens[1..])
-            .map(|(expr, rest)| (Command::Warn(expr), rest)),
-
-        Some(Keyword::Push) => parse_push(tokens),
-        Some(Keyword::Goto) => parse_goto(tokens),
-
-        Some(Keyword::Increment) => parse_arithmetic(tokens, ArithOp::Increment),
-        Some(Keyword::Decrement) => parse_arithmetic(tokens, ArithOp::Decrement),
-        Some(Keyword::Multiply)  => parse_arithmetic(tokens, ArithOp::Multiply),
-        Some(Keyword::Divide)    => parse_arithmetic(tokens, ArithOp::Divide),
-
-        Some(Keyword::Go)     => parse_go(tokens),
-        Some(Keyword::Switch) => parse_switch(tokens),
-        Some(Keyword::Store)  => parse_store(tokens),
-
-        _ => Err(Error::syntax(format!(
-            "expected a command, found {:?}", tokens.first()
-        )))
     }
 }
 
@@ -480,132 +592,99 @@ pub fn parse(_source: &str) -> Result<Program> {
 mod tests {
     use super::*;
 
+    /// Parses a source snippet as a command.
+    fn cmd(source: &str) -> Result<Command> {
+        let tokens = lexer::tokenize(source)?;
+        Parser::new(&tokens).parse_command()
+    }
+
+    /// Parses a source snippet as a value expression.
+    fn expr(source: &str) -> Result<ValueExpr> {
+        let tokens = lexer::tokenize(source)?;
+        Parser::new(&tokens).parse_value_expr()
+    }
+
+    /// Parses a source snippet as a metadata block.
+    fn meta(source: &str) -> Result<RawMetadata> {
+        let tokens = lexer::tokenize(source)?;
+        Parser::new(&tokens).parse_metadata()
+    }
+
+    fn int(n: i32) -> ValueExpr { ValueExpr::Literal(Value::Int(n)) }
+    fn var(s: &str) -> ValueExpr { ValueExpr::Var(s.into()) }
+    fn str_lit(s: &str) -> ValueExpr { ValueExpr::Literal(Value::Str(s.as_bytes().to_vec())) }
+
+    /* --- titles --- */
+
     #[test]
-    fn splits_main_title() {
-        let (title, rest) = split_title(
-            "#HELLO WORLD.\n\n@width 4", 1
-        ).unwrap();
+    fn splits_titles() {
+        let (title, rest) = split_title("#HELLO WORLD.\n\n@width 4", 1).unwrap();
         assert_eq!(title, "HELLO WORLD");
         assert_eq!(rest, "\n@width 4");
-    }
 
-    #[test]
-    fn rejects_subroutine_title_as_main() {
         assert!(split_title("##ACK.\n", 1).is_err());
-    }
-
-    #[test]
-    fn requires_trailing_period() {
         assert!(split_title("#NO PERIOD\n", 1).is_err());
     }
 
+    /* --- metadata --- */
+
     #[test]
     fn parses_metadata_block() {
-        let tokens = lexer::tokenize(
-            "\n@width 4\n@height 1\n@debug auto\n"
-        ).unwrap();
-        let (raw, _) = parse_metadata(&tokens).unwrap();
+        let raw = meta("\n@width 4\n@height 1\n@debug auto\n").unwrap();
         assert_eq!(raw.width, Some(4));
         assert_eq!(raw.height, Some(1));
         assert_eq!(raw.debug, Some(DebugMode::Auto));
+
+        assert!(meta("@bogus 5\n").is_err());
+    }
+
+    /* --- value expressions --- */
+
+    #[test]
+    fn parses_literals_and_variables() {
+        assert_eq!(expr("42").unwrap(), int(42));
+        assert_eq!(expr("-7").unwrap(), int(-7));
+        assert_eq!(expr("3.5").unwrap(), ValueExpr::Literal(Value::Float(3.5)));
+        assert_eq!(expr("'hi'").unwrap(), str_lit("hi"));
+        assert_eq!(expr("TRUE").unwrap(), ValueExpr::Literal(Value::Bool(true)));
+        assert_eq!(expr("count_2").unwrap(), var("count_2"));
     }
 
     #[test]
-    fn rejects_unknown_metadata_key() {
-        let tokens = lexer::tokenize("@bogus 5\n").unwrap();
-        assert!(parse_metadata(&tokens).is_err());
-    }
-
-    #[test]
-    fn parses_literals() {
-        let cases: Vec<(&str, Value)> = vec![
-            ("42", Value::Int(42)),
-            ("-7", Value::Int(-7)),
-            ("3.5", Value::Float(3.5)),
-            ("'hi'", Value::Str(b"hi".to_vec())),
-            ("TRUE", Value::Bool(true)),
-            ("FALSE", Value::Bool(false)),
-        ];
-
-        for (source, expected) in cases {
-            let tokens = lexer::tokenize(source).unwrap();
-            let (expr, rest) = parse_value_expr(&tokens).unwrap();
-            assert_eq!(expr, ValueExpr::Literal(expected));
-            assert!(rest.is_empty());
-        }
-    }
-
-    #[test]
-    fn parses_variable_reference() {
-        let tokens = lexer::tokenize("count_2").unwrap();
-        let (expr, rest) = parse_value_expr(&tokens).unwrap();
-        assert_eq!(expr, ValueExpr::Var("count_2".to_string()));
-        assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn parses_dynamic_variable_untyped() {
-        let tokens = lexer::tokenize("THE VARIABLE NAMED 'x'").unwrap();
-        let (expr, rest) = parse_value_expr(&tokens).unwrap();
-        assert_eq!(expr, ValueExpr::DynamicVar {
-            name: Box::new(ValueExpr::Literal(Value::Str(b"x".to_vec()))),
+    fn parses_dynamic_variables() {
+        assert_eq!(expr("THE VARIABLE NAMED 'x'").unwrap(), ValueExpr::DynamicVar {
+            name: Box::new(str_lit("x")),
             cast: None,
         });
-        assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn parses_dynamic_variable_typed() {
-        let tokens = lexer::tokenize("THE INT NAMED holder").unwrap();
-        let (expr, _) = parse_value_expr(&tokens).unwrap();
-        assert_eq!(expr, ValueExpr::DynamicVar {
-            name: Box::new(ValueExpr::Var("holder".to_string())),
+        assert_eq!(expr("THE INT NAMED holder").unwrap(), ValueExpr::DynamicVar {
+            name: Box::new(var("holder")),
             cast: Some(DataType::Int),
         });
+        // nesting exercises the recursion and the Box
+        assert_eq!(expr("THE VARIABLE NAMED THE STRING NAMED 'outer'").unwrap(),
+                   ValueExpr::DynamicVar {
+                       name: Box::new(ValueExpr::DynamicVar {
+                           name: Box::new(str_lit("outer")),
+                           cast: Some(DataType::Str),
+                       }),
+                       cast: None,
+                   });
     }
 
     #[test]
-    fn parses_nested_dynamic_variable() {
-        let tokens = lexer::tokenize(
-            "THE VARIABLE NAMED THE STRING NAMED 'outer'"
-        ).unwrap();
-        let (expr, _) = parse_value_expr(&tokens).unwrap();
-        assert_eq!(expr, ValueExpr::DynamicVar {
-            name: Box::new(ValueExpr::DynamicVar {
-                name: Box::new(ValueExpr::Literal(Value::Str(b"outer".to_vec()))),
-                cast: Some(DataType::Str),
-            }),
-            cast: None,
-        });
+    fn rejects_malformed_value_expressions() {
+        assert!(expr("THE VARIABLE 'x'").is_err()); // missing NAMED
+        assert!(expr("THE NAMED 'x'").is_err());    // bad slot after THE
+        assert!(expr("THE").is_err());              // nothing after THE
+        assert!(expr(":").is_err());
+        assert!(expr("").is_err());
     }
 
-    #[test]
-    fn leaves_trailing_tokens_unconsumed() {
-        let tokens = lexer::tokenize("5 GIVING x").unwrap();
-        let (expr, rest) = parse_value_expr(&tokens).unwrap();
-        assert_eq!(expr, ValueExpr::Literal(Value::Int(5)));
-        assert_eq!(rest.first(), Some(&Token::Keyword(Keyword::Giving)));
-    }
-
-    #[test]
-    fn rejects_malformed_dynamic_forms() {
-        // missing NAMED
-        assert!(parse_value_expr(&lexer::tokenize("THE VARIABLE 'x'").unwrap()).is_err());
-        // bad slot after THE
-        assert!(parse_value_expr(&lexer::tokenize("THE NAMED 'x'").unwrap()).is_err());
-        // nothing after THE
-        assert!(parse_value_expr(&lexer::tokenize("THE").unwrap()).is_err());
-    }
-
-    #[test]
-    fn rejects_non_value_token() {
-        assert!(parse_value_expr(&lexer::tokenize(":").unwrap()).is_err());
-        assert!(parse_value_expr(&[]).is_err());
-    }
+    /* --- commands --- */
 
     #[test]
     fn parses_zero_argument_commands() {
-        let cases = vec![
+        let cases = [
             ("START", Command::Start),
             ("HOME", Command::Home),
             ("SHUFFLE", Command::Shuffle),
@@ -615,101 +694,52 @@ mod tests {
             ("PREVIOUS ROW", Command::PreviousRow),
         ];
         for (source, expected) in cases {
-            let tokens = lexer::tokenize(source).unwrap();
-            let (cmd, rest) = parse_command(&tokens).unwrap();
-            assert_eq!(cmd, expected);
-            assert!(rest.is_empty());
+            assert_eq!(cmd(source).unwrap(), expected);
         }
+        assert!(cmd("NEXT").is_err());
+        assert!(cmd("NEXT HOME").is_err());
     }
 
     #[test]
-    fn parses_throw_and_warn() {
-        let tokens = lexer::tokenize("THROW 'boom'").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Throw(ValueExpr::Literal(Value::Str(b"boom".to_vec()))));
-
-        let tokens = lexer::tokenize("WARN x").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Warn(ValueExpr::Var("x".to_string())));
+    fn parses_single_value_commands() {
+        assert_eq!(cmd("THROW 'boom'").unwrap(), Command::Throw(str_lit("boom")));
+        assert_eq!(cmd("WARN x").unwrap(), Command::Warn(var("x")));
+        assert_eq!(cmd("PUSH 5").unwrap(), Command::Push(Some(int(5))));
+        assert_eq!(cmd("PUSH").unwrap(), Command::Push(None));
+        assert!(cmd("THROW").is_err());
     }
 
     #[test]
-    fn parses_push_with_and_without_argument() {
-        let tokens = lexer::tokenize("PUSH 5").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Push(Some(ValueExpr::Literal(Value::Int(5)))));
-
-        let tokens = lexer::tokenize("PUSH").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Push(None));
-
-        let tokens = lexer::tokenize("PUSH\nHOME").unwrap();
-        let (cmd, rest) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Push(None));
-        assert_eq!(rest.first(), Some(&Token::Newline));
+    fn parses_goto() {
+        assert_eq!(cmd("GOTO 0").unwrap(), Command::Goto(GotoTarget::Id(int(0))));
+        assert_eq!(cmd("GOTO THIS CHECKPOINT").unwrap(),
+                   Command::Goto(GotoTarget::ThisCheckpoint));
+        assert!(cmd("GOTO THIS").is_err());
+        assert!(cmd("GOTO THIS ROW").is_err());
     }
 
     #[test]
-    fn rejects_incomplete_next() {
-        assert!(parse_command(&lexer::tokenize("NEXT").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("NEXT HOME").unwrap()).is_err());
-    }
-
-    #[test]
-    fn rejects_throw_without_message() {
-        assert!(parse_command(&lexer::tokenize("THROW").unwrap()).is_err());
-    }
-
-    #[test]
-    fn parses_goto_forms() {
-        let tokens = lexer::tokenize("GOTO 0").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Goto(GotoTarget::Id(ValueExpr::Literal(Value::Int(0)))));
-
-        let tokens = lexer::tokenize("GOTO THIS CHECKPOINT").unwrap();
-        let (cmd, rest) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Goto(GotoTarget::ThisCheckpoint));
-        assert!(rest.is_empty());
-    }
-
-    #[test]
-    fn rejects_this_without_checkpoint() {
-        assert!(parse_command(&lexer::tokenize("GOTO THIS").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("GOTO THIS ROW").unwrap()).is_err());
-    }
-
-    #[test]
-    fn parses_arithmetic_forms() {
-        let tokens = lexer::tokenize("INCREMENT").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Arithmetic {
+    fn parses_arithmetic() {
+        assert_eq!(cmd("INCREMENT").unwrap(), Command::Arithmetic {
             op: ArithOp::Increment, target: None, by: None, giving: None,
         });
-
-        let tokens = lexer::tokenize("INCREMENT x BY 5 GIVING y").unwrap();
-        let (cmd, rest) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Arithmetic {
+        assert_eq!(cmd("INCREMENT x BY 5 GIVING y").unwrap(), Command::Arithmetic {
             op: ArithOp::Increment,
-            target: Some(ValueExpr::Var("x".into())),
-            by: Some(ValueExpr::Literal(Value::Int(5))),
-            giving: Some(ValueExpr::Var("y".into())),
+            target: Some(var("x")),
+            by: Some(int(5)),
+            giving: Some(var("y")),
         });
-        assert!(rest.is_empty());
+        // BY in the target slot must not be eaten as a target
+        assert!(matches!(cmd("INCREMENT BY 5").unwrap(),
+            Command::Arithmetic { target: None, by: Some(_), .. }));
 
-        let tokens = lexer::tokenize("INCREMENT BY 5").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert!(matches!(cmd, Command::Arithmetic { target: None, by: Some(_), .. }));
+        assert!(cmd("MULTIPLY x").is_err());
+        assert!(cmd("MULTIPLY x BY 2").is_ok());
     }
 
     #[test]
-    fn multiply_requires_by() {
-        assert!(parse_command(&lexer::tokenize("MULTIPLY x").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("MULTIPLY x BY 2").unwrap()).is_ok());
-    }
-
-    #[test]
-    fn parses_go_forms() {
-        let cases = vec![
+    fn parses_go() {
+        let cases = [
             ("GO NORTH", GoTarget::North, false),
             ("GO SOUTH", GoTarget::South, false),
             ("GO EAST", GoTarget::East, false),
@@ -717,86 +747,202 @@ mod tests {
             ("GO RANDOM", GoTarget::Random, false),
             ("GO THIS DIRECTION", GoTarget::ThisDirection, false),
             ("GO RELATIVE TO THIS DIRECTION", GoTarget::ThisDirection, true),
+            ("GO 45", GoTarget::Value(int(45)), false),
+            ("GO RELATIVE TO 90", GoTarget::Value(int(90)), true),
         ];
         for (source, target, relative) in cases {
-            let tokens = lexer::tokenize(source).unwrap();
-            let (cmd, rest) = parse_command(&tokens).unwrap();
-            assert_eq!(cmd, Command::Go { target, relative });
-            assert!(rest.is_empty());
+            assert_eq!(cmd(source).unwrap(), Command::Go { target, relative });
         }
+
+        assert!(cmd("GO RELATIVE NORTH").is_err());
+        assert!(cmd("GO RELATIVE TO NORTH").is_err());
+        assert!(cmd("GO THIS ROW").is_err());
     }
 
     #[test]
-    fn parses_go_with_value() {
-        let tokens = lexer::tokenize("GO 45").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Go {
-            target: GoTarget::Value(ValueExpr::Literal(Value::Int(45))),
-            relative: false,
-        });
-
-        let tokens = lexer::tokenize("GO RELATIVE TO 90").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert!(matches!(cmd, Command::Go { relative: true, .. }));
-    }
-
-    #[test]
-    fn rejects_bad_go_forms() {
-        assert!(parse_command(&lexer::tokenize("GO RELATIVE NORTH").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("GO RELATIVE TO NORTH").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("GO THIS ROW").unwrap()).is_err());
-    }
-
-    #[test]
-    fn parses_switch_forms() {
-        let five = ValueExpr::Literal(Value::Int(5));
-        let cases = vec![
+    fn parses_switch() {
+        let cases = [
             ("SWITCH RANDOM", SwitchCond::Random),
-            ("SWITCH 5", SwitchCond::Truthy(five.clone())),
-            ("SWITCH !5", SwitchCond::Falsy(five.clone())),
-            ("SWITCH =5", SwitchCond::Equals(five.clone())),
-            ("SWITCH !=5", SwitchCond::NotEquals(five)),
+            ("SWITCH 5", SwitchCond::Truthy(int(5))),
+            ("SWITCH !5", SwitchCond::Falsy(int(5))),
+            ("SWITCH =5", SwitchCond::Equals(int(5))),
+            ("SWITCH !=5", SwitchCond::NotEquals(int(5))),
         ];
         for (source, expected) in cases {
-            let tokens = lexer::tokenize(source).unwrap();
-            let (cmd, rest) = parse_command(&tokens).unwrap();
-            assert_eq!(cmd, Command::Switch(expected));
-            assert!(rest.is_empty());
+            assert_eq!(cmd(source).unwrap(), Command::Switch(expected));
         }
+        // operator forms compose with the full value grammar
+        assert!(matches!(cmd("SWITCH =THE INT NAMED 'n'").unwrap(),
+            Command::Switch(SwitchCond::Equals(ValueExpr::DynamicVar { .. }))));
+
+        assert!(cmd("SWITCH").is_err());
+        assert!(cmd("SWITCH =").is_err());
     }
 
     #[test]
-    fn switch_accepts_variables_and_dynamic_names() {
-        let tokens = lexer::tokenize("SWITCH !x").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Switch(SwitchCond::Falsy(ValueExpr::Var("x".into()))));
-
-        let tokens = lexer::tokenize("SWITCH =THE INT NAMED 'n'").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert!(matches!(cmd, Command::Switch(SwitchCond::Equals(ValueExpr::DynamicVar { .. }))));
-    }
-
-    #[test]
-    fn rejects_switch_without_operand() {
-        assert!(parse_command(&lexer::tokenize("SWITCH").unwrap()).is_err());
-        assert!(parse_command(&lexer::tokenize("SWITCH =").unwrap()).is_err());
-    }
-
-    #[test]
-    fn parses_store_forms() {
-        let tokens = lexer::tokenize("STORE 5").unwrap();
-        let (cmd, _) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Store {
-            source: StoreSource::Value(ValueExpr::Literal(Value::Int(5))),
+    fn parses_store() {
+        assert_eq!(cmd("STORE 5").unwrap(), Command::Store {
+            source: StoreSource::Value(int(5)),
             target: None,
         });
-
-        let tokens = lexer::tokenize("STORE RANDOM TO x").unwrap();
-        let (cmd, rest) = parse_command(&tokens).unwrap();
-        assert_eq!(cmd, Command::Store {
+        assert_eq!(cmd("STORE RANDOM TO x").unwrap(), Command::Store {
             source: StoreSource::Random,
-            target: Some(ValueExpr::Var("x".into())),
+            target: Some(var("x")),
         });
-        assert!(rest.is_empty());
+    }
+
+    /* --- cursor behaviour --- */
+
+    #[test]
+    fn stops_at_line_end_without_consuming() {
+        let tokens = lexer::tokenize("PUSH\nHOME").unwrap();
+        let mut p = Parser::new(&tokens);
+        assert_eq!(p.parse_command().unwrap(), Command::Push(None));
+        assert_eq!(p.peek(), Some(&Token::Newline));
+    }
+
+    #[test]
+    fn leaves_trailing_tokens_unconsumed() {
+        let tokens = lexer::tokenize("5 GIVING x").unwrap();
+        let mut p = Parser::new(&tokens);
+        assert_eq!(p.parse_value_expr().unwrap(), int(5));
+        assert_eq!(p.peek(), Some(&Token::Keyword(Keyword::Giving)));
+    }
+
+    #[test]
+    fn parses_peek() {
+        assert_eq!(cmd("PEEK").unwrap(), Command::Peek(None));
+        assert_eq!(cmd("PEEK TO x").unwrap(), Command::Peek(Some(ToClause {
+            cast: None,
+            target: var("x"),
+        })));
+        assert_eq!(cmd("PEEK TO INT x").unwrap(), Command::Peek(Some(ToClause {
+            cast: Some(DataType::Int),
+            target: var("x"),
+        })));
+        assert!(cmd("PEEK TO").is_err());
+    }
+
+    #[test]
+    fn parses_split_and_return() {
+        assert_eq!(cmd("SPLIT 'a b'").unwrap(), Command::Split {
+            value: str_lit("a b"), over: None,
+        });
+        assert_eq!(cmd("SPLIT s OVER ','").unwrap(), Command::Split {
+            value: var("s"), over: Some(str_lit(",")),
+        });
+        assert_eq!(cmd("RETURN").unwrap(), Command::Return(None));
+        assert_eq!(cmd("RETURN 5").unwrap(), Command::Return(Some(int(5))));
+        assert!(cmd("SPLIT").is_err());
+    }
+
+    #[test]
+    fn parses_print() {
+        assert_eq!(cmd("PRINT").unwrap(), Command::Print(PrintTarget::DataCell));
+        assert_eq!(cmd("PRINT NEWLINE").unwrap(), Command::Print(PrintTarget::Newline));
+        assert_eq!(cmd("PRINT 'hi'").unwrap(), Command::Print(PrintTarget::Value(str_lit("hi"))));
+        assert_eq!(cmd("PRINT FILE 'a.txt'").unwrap(),
+                   Command::Print(PrintTarget::File(str_lit("a.txt"))));
+        assert_eq!(cmd("PRINT IMAGE p").unwrap(),
+                   Command::Print(PrintTarget::Image(var("p"))));
+    }
+
+    #[test]
+    fn parses_remove() {
+        assert_eq!(cmd("REMOVE").unwrap(),
+                   Command::Remove { from: RemoveFrom::Bottom, to: None });
+        assert_eq!(cmd("REMOVE TOP").unwrap(),
+                   Command::Remove { from: RemoveFrom::Top, to: None });
+        assert_eq!(cmd("REMOVE ANY POSITION").unwrap(),
+                   Command::Remove { from: RemoveFrom::AnyPosition, to: None });
+        assert_eq!(cmd("REMOVE THIS POSITION").unwrap(),
+                   Command::Remove { from: RemoveFrom::ThisPosition, to: None });
+        assert_eq!(cmd("REMOVE 3").unwrap(),
+                   Command::Remove { from: RemoveFrom::Position(int(3)), to: None });
+
+        // bare REMOVE followed directly by TO -- the guard's reason for existing
+        assert_eq!(cmd("REMOVE TO INT x").unwrap(), Command::Remove {
+            from: RemoveFrom::Bottom,
+            to: Some(ToClause { cast: Some(DataType::Int), target: var("x") }),
+        });
+
+        assert!(cmd("REMOVE ANY").is_err());
+        assert!(cmd("REMOVE THIS ROW").is_err());
+    }
+
+    #[test]
+    fn parses_load_file() {
+        assert_eq!(cmd("LOAD FILE 'a.txt'").unwrap(), Command::LoadFile {
+            path: str_lit("a.txt"), to: None,
+        });
+        assert_eq!(cmd("LOAD FILE p TO STRING s").unwrap(), Command::LoadFile {
+            path: var("p"),
+            to: Some(ToClause { cast: Some(DataType::Str), target: var("s") }),
+        });
+
+        assert!(cmd("LOAD 'a.txt'").is_err()); // missing FILE
+        assert!(cmd("LOAD FILE").is_err());
+    }
+
+    #[test]
+    fn parses_move_last_node() {
+        assert_eq!(cmd("MOVE LAST NODE TO 3 4").unwrap(), Command::MoveLastNode {
+            mode: MoveMode::To, x: int(3), y: int(4),
+        });
+        assert_eq!(cmd("MOVE LAST NODE BY -1 2").unwrap(), Command::MoveLastNode {
+            mode: MoveMode::By, x: int(-1), y: int(2),
+        });
+
+        assert!(cmd("MOVE LAST NODE 3 4").is_err());  // missing TO/BY
+        assert!(cmd("MOVE NODE TO 3 4").is_err());    // missing LAST
+        assert!(cmd("MOVE LAST NODE TO 3").is_err()); // missing y
+    }
+
+    #[test]
+    fn parses_call() {
+        assert_eq!(cmd("CALL ACK").unwrap(), Command::Call {
+            name: "ACK".into(), arguments: vec![], giving: None,
+        });
+        assert_eq!(cmd("CALL ACK WITH ARGUMENTS x y GIVING z").unwrap(), Command::Call {
+            name: "ACK".into(),
+            arguments: vec![var("x"), var("y")],
+            giving: Some(var("z")),
+        });
+        assert_eq!(cmd("CALL FOO WITH ARGUMENTS 'Foo' 17").unwrap(), Command::Call {
+            name: "FOO".into(),
+            arguments: vec![str_lit("Foo"), int(17)],
+            giving: None,
+        });
+        assert_eq!(cmd("CALL FOO GIVING x").unwrap(), Command::Call {
+            name: "FOO".into(), arguments: vec![], giving: Some(var("x")),
+        });
+
+        // a multi-token argument counts as one argument, not four
+        assert_eq!(cmd("CALL FOO WITH ARGUMENTS THE INT NAMED 'n' 5").unwrap(), Command::Call {
+            name: "FOO".into(),
+            arguments: vec![
+                ValueExpr::DynamicVar {
+                    name: Box::new(str_lit("n")),
+                    cast: Some(DataType::Int),
+                },
+                int(5),
+            ],
+            giving: None,
+        });
+
+        assert!(cmd("CALL PRINT").is_err()); // reserved word as name
+        assert!(cmd("CALL x").is_err());     // lowercase name
+        assert!(cmd("CALL").is_err());
+        assert!(cmd("CALL FOO WITH x").is_err()); // missing ARGUMENTS
+    }
+
+    #[test]
+    fn call_arguments_stop_at_line_end() {
+        let tokens = lexer::tokenize("CALL FOO WITH ARGUMENTS x\nHOME").unwrap();
+        let mut p = Parser::new(&tokens);
+        assert_eq!(p.parse_command().unwrap(), Command::Call {
+            name: "FOO".into(), arguments: vec![var("x")], giving: None,
+        });
+        assert_eq!(p.peek(), Some(&Token::Newline));
     }
 }

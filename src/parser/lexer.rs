@@ -1,12 +1,13 @@
 use std::iter::Peekable;
 use std::str::{Chars, FromStr};
 use strum_macros::EnumString;
-use crate::error::{GridScriptError, Result};
+use crate::error::{GridScriptError as Error, Result};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Keyword(Keyword),
     Identifier(String),
+    UpperName(String),
     IntLiteral(i32),
     FloatLiteral(f32),
     StringLiteral(Vec<u8>),
@@ -59,13 +60,13 @@ fn scan_number(chars: &mut Peekable<Chars>) -> Result<Token> {
     if seen_dot { // float
         buffer.parse::<f32>()
             .map(Token::FloatLiteral)
-            .map_err(|_| GridScriptError::syntax(format!(
+            .map_err(|_| Error::syntax(format!(
                 "invalid float literal '{buffer}'"
             )))
     } else { // int
         buffer.parse::<i32>()
             .map(Token::IntLiteral)
-            .map_err(|_| GridScriptError::syntax(format!(
+            .map_err(|_| Error::syntax(format!(
                 "invalid int literal '{buffer}'"
             )))
     }
@@ -91,12 +92,22 @@ fn scan_word(chars: &mut Peekable<Chars>) -> Result<Token> {
         .map(|c| c.is_ascii_digit())
         .unwrap_or(false);
 
-    if buffer == buffer.to_lowercase() && !starts_with_digit {
+    if starts_with_digit {
+        return Err(Error::syntax(format!(
+            "identifiers cannot begin with a digit: '{buffer}'"
+        )));
+    }
+
+    if buffer == buffer.to_lowercase() {
         return Ok(Token::Identifier(buffer));
     }
 
-    Err(GridScriptError::syntax(format!(
-        "invalid keyword or variable identifier '{buffer}'"
+    if buffer == buffer.to_uppercase() {
+        return Ok(Token::UpperName(buffer));
+    }
+
+    Err(Error::syntax(format!(
+        "identifiers must be all lowercase or all uppercase: '{buffer}'"
     )))
 }
 
@@ -109,7 +120,7 @@ fn scan_string(chars: &mut Peekable<Chars>) -> Result<Token> {
         match chars.next() {
             Some('\'') => break, // closing quote
             Some(c) => buffer.push(c),
-            None => return Err(GridScriptError::syntax(String::from(
+            None => return Err(Error::syntax(String::from(
                 "unterminated string literal"
             ))),
         }
@@ -156,7 +167,7 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
                 tokens.push(scan_word(&mut chars)?);
             }
             _ => {
-                return Err(GridScriptError::syntax(format!("unexpected character '{c}'")));
+                return Err(Error::syntax(format!("unexpected character '{c}'")));
             }
         }
     }
