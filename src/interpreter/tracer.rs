@@ -20,7 +20,7 @@ impl ProgramTracer {
     /// Returns the segment (start, end) to test for intersection against nodes.
     pub fn advance(&mut self) -> (Point, Point) {
         let start: Point = (self.x, self.y);
-        let rad: f32 = (self.direction as f32).to_radians();
+        let rad: f32 = f32::from(self.direction).to_radians();
         self.x += rad.cos();
         self.y += rad.sin();
         (start, (self.x, self.y))

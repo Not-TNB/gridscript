@@ -59,8 +59,14 @@ pub enum GridScriptError {
     #[error("required metadata key '{0}' is missing")]
     MissingMetadata(String),
 
+    #[error("cannot store to the literal value {0}: a write target must be a variable")]
+    InvalidTarget(String),
+
     #[error("{0}")]
     Throw(String),
+
+    #[error("I/O error: {0}")]
+    Io(String),
 }
 
 /// Non-fatal and logged, does not stop execution
@@ -83,6 +89,9 @@ pub enum GridScriptWarning {
 
     #[error("output console does not support graphical output")]
     NoGraphicalOutput,
+
+    #[error("cannot cast value {0} to INT for dataspace storage, storing 0")]
+    NotAnInt(Value),
 
     #[error("{0}")]
     Custom(String),

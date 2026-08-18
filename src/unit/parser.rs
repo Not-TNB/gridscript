@@ -1,3 +1,5 @@
+//! Unit tests for `parser`
+
 use super::*;
 
 /// Parses a source snippet as a command.
