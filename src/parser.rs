@@ -167,7 +167,7 @@ fn split_title(source: &str, octothorpes: usize) -> Result<(&str, &str)> {
  * METADATA PARSING
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Reads one `true`/`false`/`auto` value associated with `@debug`.
     fn expect_debug_mode(&mut self) -> Result<DebugMode> {
         let mode = match self.peek() {
@@ -240,7 +240,7 @@ impl<'a> Parser<'a> {
  * VALUE EXPRESSION PARSING
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses a value expression of the form `THE _ NAMED _`.
     /// PRE: the cursor is at `Keyword::The`
     fn parse_dynamic_value_expr(&mut self) -> Result<ValueExpr> {
@@ -295,7 +295,7 @@ impl<'a> Parser<'a> {
  * COMMAND PARSING
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses one command.
     fn parse_command(&mut self) -> Result<Command> {
         match self.keyword() {
@@ -691,7 +691,7 @@ enum BodyLine {
     Checkpoint(Checkpoint),
 }
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses a coordinate, errors if out of i32 range.
     fn expect_coord(&mut self) -> Result<i32> {
         let n = self.expect_int()?;
@@ -730,7 +730,7 @@ impl<'a> Parser<'a> {
  * SCOPE ASSEMBLY AND SPLITTER
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Parser<'a> {
+impl Parser<'_> {
     /// Parses the node body.
     fn parse_body(&mut self) -> Result<(Vec<Node>, Vec<Checkpoint>)> {
         let mut nodes = Vec::new();

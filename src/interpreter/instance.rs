@@ -76,10 +76,10 @@ impl<'a> Instance<'a> {
  * GEOMETRY
  * ---------------------------------------------------------------------------------------------- */
 
-/// True if `point` comes within `radius` of `center` (inclusive).
+/// True if `point` comes within `radius` of `center` (exclusive).
 fn point_in_circle(point: Point, center: Point, radius: f32) -> bool {
     let (dx, dy) = (center.0 - point.0, center.1 - point.1);
-    dx * dx + dy * dy <= radius * radius
+    dx * dx + dy * dy < radius * radius
 }
 
 /// True if the segment from `start` to `end` comes within `radius` of `center`.
@@ -120,7 +120,7 @@ fn cast_or_warn(value: Value, target: DataType, ctx: &mut RunContext) -> Value {
     or_warn(cast, Warning::CastFailed { value, target }, ctx)
 }
 
-impl<'a> Instance<'a> {
+impl Instance<'_> {
     /// Resolves a value expression
     pub fn eval(&self, expr: &ValueExpr, ctx: &mut RunContext) -> Result<Value> {
         match expr {
@@ -258,7 +258,7 @@ fn as_int(value: Value, ctx: &mut RunContext) -> i32 {
  * MISCELLANEOUS HELPERS
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Instance<'a> {
+impl Instance<'_> {
     /// Removes the buffer value at a signed index, warning and yielding NULL if the
     /// index is negative or OOB.
     fn remove_at_index(&mut self, index: i32, ctx: &mut RunContext) -> Value {
@@ -277,12 +277,11 @@ impl<'a> Instance<'a> {
     /// each is entered. Stops early if a command ends or suspends this frame.
     fn execute_nodes(&mut self, indices: Vec<usize>, ctx: &mut RunContext) -> Result<StepOutcome> {
         for index in indices {
-            self.last_node = Some(index);
-
             // an earlier command in this batch may have deleted the node
             let Some(node) = self.nodes.get(index) else {
                 continue;
             };
+            self.last_node = Some(index);
             let command = node.command.clone();
 
             match self.exec_command(&command, ctx)? {
@@ -310,7 +309,7 @@ impl<'a> Instance<'a> {
  * COMMAND EXECUTION
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Instance<'a> {
+impl Instance<'_> {
     /// Executes one command against this frame, returning where control should go next.
     pub fn exec_command(&mut self, command: &Command, ctx: &mut RunContext) -> Result<StepOutcome> {
         match command {
@@ -548,7 +547,8 @@ impl<'a> Instance<'a> {
         let sep = self.eval_opt(over, ctx)?.map(|v| as_bytes(v, ctx));
         let parts = match sep {
             Some(sep) if !sep.is_empty() => split_bytes(&subject, &sep),
-            _ => subject
+            Some(_) => subject.iter().map(|b| vec![*b]).collect(),
+            None => subject
                 .split(|b| b.is_ascii_whitespace())
                 .filter(|piece| !piece.is_empty())
                 .map(<[u8]>::to_vec)
@@ -736,10 +736,10 @@ impl<'a> Instance<'a> {
 }
 
 /* ----------------------------------------------------------------------------------------------
- * STEP
+ * EXPOSED METHODS
  * ---------------------------------------------------------------------------------------------- */
 
-impl<'a> Instance<'a> {
+impl Instance<'_> {
     pub fn step(&mut self, ctx: &mut RunContext) -> Result<StepOutcome> {
         // check if max steps exceeded
         if let Some(lim) = self.steps_limit
@@ -774,6 +774,18 @@ impl<'a> Instance<'a> {
             .collect();
 
         self.execute_nodes(triggered, ctx)
+    }
+
+    pub fn store_call_result(
+        &mut self,
+        returned: Option<Value>,
+        giving: &Option<ValueExpr>,
+        ctx: &mut RunContext,
+    ) -> Result<()> {
+        match (returned, giving) {
+            (None, None) => Ok(()),
+            (v, g) => self.store(v.unwrap_or(Value::Null), g.as_ref(), None, ctx),
+        }
     }
 }
 

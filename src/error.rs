@@ -19,6 +19,9 @@ pub enum GridScriptError {
     #[error("more than one START node found in {0}")]
     DuplicateStart(String),
 
+    #[error("no subroutines found with the name {0}")]
+    NoSuchSubroutine(String),
+
     #[error("multiple subroutines found with the name {0}")]
     DuplicateSubroutine(String),
 
@@ -36,16 +39,6 @@ pub enum GridScriptError {
     {given} argument(s) provide"
     )]
     TooFewArguments { name: String, given: usize },
-
-    #[error(
-        "subroutine '{name}' called with {given} argument(s) but only \
-    consumed {consumed} via INPUT"
-    )]
-    TooManyArguments {
-        name: String,
-        given: usize,
-        consumed: usize,
-    },
 
     #[error("maximum call depth ({0}) exceeded")]
     MaxDepthExceeded(u32),

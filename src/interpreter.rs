@@ -5,3 +5,4 @@ pub mod io;
 pub mod node;
 pub mod state;
 pub mod tracer;
+pub use exec::run;

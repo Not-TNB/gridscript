@@ -1,5 +1,6 @@
 use crate::error::GridScriptWarning;
-use crate::interpreter::io::{Input, Output};
+use crate::interpreter::io::{Input, Output, StdInput, StdOutput};
+use crate::program::Program;
 use crate::rng::GridScriptRng;
 
 /// Program-wide state shared across all execution frames:
@@ -19,6 +20,17 @@ impl RunContext {
             output,
             input,
         }
+    }
+
+    /// Builds a context wired to real stdio. Seed precedence: `seed_override`
+    /// (CLI `--seed`), then the main program's `@seed`, then OS entropy.
+    pub fn std(program: &Program, seed_override: Option<u64>) -> Self {
+        let seed = seed_override.or(program.main.metadata.seed);
+        let rng = match seed {
+            Some(s) => GridScriptRng::from_seed(s),
+            None => GridScriptRng::from_entropy(),
+        };
+        RunContext::new(rng, Box::new(StdOutput), Box::new(StdInput))
     }
 
     pub fn warn(&mut self, warning: GridScriptWarning) {
@@ -50,6 +62,7 @@ impl RunContext {
     }
 
     /// Output captured so far, when the sink supports it. Testing aid.
-    pub fn captured_output(&self) -> Option<&[u8]> { self.output.captured() }
+    pub fn captured_output(&self) -> Option<&[u8]> {
+        self.output.captured()
+    }
 }
-

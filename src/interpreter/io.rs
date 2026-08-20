@@ -17,7 +17,9 @@ pub trait Output {
     }
 
     /// Bytes written so far, for sinks that capture rather than stream.
-    fn captured(&self) -> Option<&[u8]> { None }
+    fn captured(&self) -> Option<&[u8]> {
+        None
+    }
 }
 
 /// Source for program input
@@ -69,7 +71,9 @@ impl Output for BufferOut {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
-    fn captured(&self) -> Option<&[u8]> { Some(&self.bytes) }
+    fn captured(&self) -> Option<&[u8]> {
+        Some(&self.bytes)
+    }
 }
 
 #[derive(Debug, Default)]
