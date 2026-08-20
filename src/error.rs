@@ -87,6 +87,9 @@ pub enum GridScriptWarning {
     #[error("buffer position '{0}' is out of range or not an integer")]
     InvalidBufferPosition(String),
 
+    #[error("buffer is empty")]
+    EmptyBuffer,
+
     #[error("output console does not support graphical output")]
     NoGraphicalOutput,
 
@@ -102,5 +105,11 @@ pub type Result<T> = std::result::Result<T, GridScriptError>;
 impl GridScriptError {
     pub fn syntax(msg: impl Into<String>) -> Self {
         GridScriptError::SyntaxError(msg.into())
+    }
+}
+
+impl From<std::io::Error> for GridScriptError {
+    fn from(e: std::io::Error) -> Self {
+        GridScriptError::Io(e.to_string())
     }
 }

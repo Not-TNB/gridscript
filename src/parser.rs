@@ -296,8 +296,57 @@ impl<'a> Parser<'a> {
  * ---------------------------------------------------------------------------------------------- */
 
 impl<'a> Parser<'a> {
+    /// Parses one command.
+    fn parse_command(&mut self) -> Result<Command> {
+        match self.keyword() {
+            Some(Keyword::Start) => {
+                self.advance();
+                Ok(Command::Start)
+            }
+            Some(Keyword::Home) => {
+                self.advance();
+                Ok(Command::Home)
+            }
+            Some(Keyword::Shuffle) => {
+                self.advance();
+                Ok(Command::Shuffle)
+            }
+
+            Some(Keyword::Next) => self.parse_value_or_row(Command::NextValue, Command::NextRow),
+            Some(Keyword::Previous) => {
+                self.parse_value_or_row(Command::PreviousValue, Command::PreviousRow)
+            }
+
+            Some(Keyword::Increment) => self.parse_arithmetic(ArithOp::Increment),
+            Some(Keyword::Decrement) => self.parse_arithmetic(ArithOp::Decrement),
+            Some(Keyword::Multiply) => self.parse_arithmetic(ArithOp::Multiply),
+            Some(Keyword::Divide) => self.parse_arithmetic(ArithOp::Divide),
+            Some(Keyword::Throw) => self.parse_throw(),
+            Some(Keyword::Warn) => self.parse_warn(),
+            Some(Keyword::Push) => self.parse_push(),
+            Some(Keyword::Goto) => self.parse_goto(),
+            Some(Keyword::Go) => self.parse_go(),
+            Some(Keyword::Switch) => self.parse_switch(),
+            Some(Keyword::Store) => self.parse_store(),
+            Some(Keyword::Peek) => self.parse_peek(),
+            Some(Keyword::Split) => self.parse_split(),
+            Some(Keyword::Return) => self.parse_return(),
+            Some(Keyword::Print) => self.parse_print(),
+            Some(Keyword::Remove) => self.parse_remove(),
+            Some(Keyword::Load) => self.parse_load_file(),
+            Some(Keyword::Move) => self.parse_move_last_node(),
+            Some(Keyword::Call) => self.parse_call(),
+            Some(Keyword::Input) => self.parse_input(),
+
+            _ => Err(Error::syntax(format!(
+                "expected a command, found {:?}",
+                self.peek()
+            ))),
+        }
+    }
+
     /// Parses either a `VALUE` or a `ROW`, producing a given command.
-    /// PRE: the cursor is at `NEXT` or `PREVIOUS`
+    /// PRE: the cursor is at `NEXT` or `PREVIOUS`.
     fn parse_value_or_row(&mut self, on_value: Command, on_row: Command) -> Result<Command> {
         self.advance(); // consume NEXT/PREVIOUS
         match self.keyword() {
@@ -483,7 +532,7 @@ impl<'a> Parser<'a> {
         Ok(Command::Peek(self.parse_to_clause()?))
     }
 
-    /// Parses `SPLIT string [OVER separator]`
+    /// Parses `SPLIT string [OVER separator]`.
     fn parse_split(&mut self) -> Result<Command> {
         self.advance(); // consume SPLIT
         let value = self.parse_value_expr()?;
@@ -491,7 +540,7 @@ impl<'a> Parser<'a> {
         Ok(Command::Split { value, over })
     }
 
-    /// Parses `RETURN [value]`
+    /// Parses `RETURN [value]`.
     fn parse_return(&mut self) -> Result<Command> {
         self.advance(); // consume RETURN
         Ok(Command::Return(if self.at_line_end() {
@@ -501,7 +550,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// Parses `PRINT [value|NEWLINE|IMAGE path|FILE path]`
+    /// Parses `PRINT [value|NEWLINE|IMAGE path|FILE path]`.
     fn parse_print(&mut self) -> Result<Command> {
         self.advance(); // consume PRINT
         Ok(Command::Print(if self.at_line_end() {
@@ -525,7 +574,7 @@ impl<'a> Parser<'a> {
         }))
     }
 
-    /// Parses `REMOVE [position|THIS POSITION|TOP|ANY POSITION] [TO [type] variable]`
+    /// Parses `REMOVE [position|THIS POSITION|TOP|ANY POSITION] [TO [type] variable]`.
     fn parse_remove(&mut self) -> Result<Command> {
         self.advance(); // consume REMOVE
         let from = match self.keyword() {
@@ -550,7 +599,7 @@ impl<'a> Parser<'a> {
         Ok(Command::Remove { from, to })
     }
 
-    /// Parses `LOAD FILE path [TO [type] variable]`
+    /// Parses `LOAD FILE path [TO [type] variable]`.
     fn parse_load_file(&mut self) -> Result<Command> {
         self.advance();
         self.expect_keyword(Keyword::File)?;
@@ -559,7 +608,7 @@ impl<'a> Parser<'a> {
         Ok(Command::LoadFile { path, to })
     }
 
-    /// Parses `MOVE LAST NODE TO|BY x y`
+    /// Parses `MOVE LAST NODE TO|BY x y`.
     fn parse_move_last_node(&mut self) -> Result<Command> {
         self.advance();
         self.expect_keyword(Keyword::Last)?;
@@ -579,7 +628,7 @@ impl<'a> Parser<'a> {
         Ok(Command::MoveLastNode { mode, x, y })
     }
 
-    /// Parses `CALL name [WITH ARGUMENTS args] [GIVING variable]`
+    /// Parses `CALL name [WITH ARGUMENTS args] [GIVING variable]`.
     fn parse_call(&mut self) -> Result<Command> {
         self.advance();
         let name = match self.peek() {
@@ -614,7 +663,7 @@ impl<'a> Parser<'a> {
         })
     }
 
-    /// Parses `INPUT [type] [TO variable] [WITH PROMPT prompt]`
+    /// Parses `INPUT [type] [TO variable] [WITH PROMPT prompt]`.
     fn parse_input(&mut self) -> Result<Command> {
         self.advance(); // consume INPUT
         let cast = self.eat_data_type();
@@ -631,55 +680,6 @@ impl<'a> Parser<'a> {
             prompt,
         })
     }
-
-    /// Parses one command.
-    fn parse_command(&mut self) -> Result<Command> {
-        match self.keyword() {
-            Some(Keyword::Start) => {
-                self.advance();
-                Ok(Command::Start)
-            }
-            Some(Keyword::Home) => {
-                self.advance();
-                Ok(Command::Home)
-            }
-            Some(Keyword::Shuffle) => {
-                self.advance();
-                Ok(Command::Shuffle)
-            }
-
-            Some(Keyword::Next) => self.parse_value_or_row(Command::NextValue, Command::NextRow),
-            Some(Keyword::Previous) => {
-                self.parse_value_or_row(Command::PreviousValue, Command::PreviousRow)
-            }
-
-            Some(Keyword::Increment) => self.parse_arithmetic(ArithOp::Increment),
-            Some(Keyword::Decrement) => self.parse_arithmetic(ArithOp::Decrement),
-            Some(Keyword::Multiply) => self.parse_arithmetic(ArithOp::Multiply),
-            Some(Keyword::Divide) => self.parse_arithmetic(ArithOp::Divide),
-            Some(Keyword::Throw) => self.parse_throw(),
-            Some(Keyword::Warn) => self.parse_warn(),
-            Some(Keyword::Push) => self.parse_push(),
-            Some(Keyword::Goto) => self.parse_goto(),
-            Some(Keyword::Go) => self.parse_go(),
-            Some(Keyword::Switch) => self.parse_switch(),
-            Some(Keyword::Store) => self.parse_store(),
-            Some(Keyword::Peek) => self.parse_peek(),
-            Some(Keyword::Split) => self.parse_split(),
-            Some(Keyword::Return) => self.parse_return(),
-            Some(Keyword::Print) => self.parse_print(),
-            Some(Keyword::Remove) => self.parse_remove(),
-            Some(Keyword::Load) => self.parse_load_file(),
-            Some(Keyword::Move) => self.parse_move_last_node(),
-            Some(Keyword::Call) => self.parse_call(),
-            Some(Keyword::Input) => self.parse_input(),
-
-            _ => Err(Error::syntax(format!(
-                "expected a command, found {:?}",
-                self.peek()
-            ))),
-        }
-    }
 }
 
 /* ----------------------------------------------------------------------------------------------
@@ -692,13 +692,13 @@ enum BodyLine {
 }
 
 impl<'a> Parser<'a> {
-    /// Parses a coordinate, errors if out of i32 range
+    /// Parses a coordinate, errors if out of i32 range.
     fn expect_coord(&mut self) -> Result<i32> {
         let n = self.expect_int()?;
         i32::try_from(n).map_err(|_| Error::syntax(format!("coordinate {n} is out of range")))
     }
 
-    /// Parses `(x,y)` into a position
+    /// Parses `(x,y)` into a position.
     fn parse_position(&mut self) -> Result<Position> {
         self.expect_token(Token::LParen)?;
         let x = self.expect_coord()?;
@@ -708,7 +708,7 @@ impl<'a> Parser<'a> {
         Ok(Position { x, y })
     }
 
-    /// Parses `(x,y):COMMAND|(CHECKPOINT id)`
+    /// Parses `(x,y):COMMAND|(CHECKPOINT id)`.
     fn parse_body_line(&mut self) -> Result<BodyLine> {
         let position = self.parse_position()?;
         self.expect_token(Token::Colon)?;
@@ -731,7 +731,7 @@ impl<'a> Parser<'a> {
  * ---------------------------------------------------------------------------------------------- */
 
 impl<'a> Parser<'a> {
-    /// Parses the node body
+    /// Parses the node body.
     fn parse_body(&mut self) -> Result<(Vec<Node>, Vec<Checkpoint>)> {
         let mut nodes = Vec::new();
         let mut checkpoints = Vec::new();
@@ -749,7 +749,7 @@ impl<'a> Parser<'a> {
     }
 }
 
-/// Parses one scope: a title line, a metadata blcok and a node body
+/// Parses one scope: a title line, a metadata blcok and a node body.
 fn parse_scope(source: &str, octothorpes: usize) -> Result<(Scope, Option<i64>)> {
     let (title, rest) = split_title(source, octothorpes)?;
     let title = title.to_string();
@@ -799,7 +799,7 @@ fn parse_scope(source: &str, octothorpes: usize) -> Result<(Scope, Option<i64>)>
     ))
 }
 
-/// Splits `source` into the main program and subroutines
+/// Splits `source` into the main program and subroutines.
 fn split_scopes(source: &str) -> (&str, Vec<&str>) {
     let mut cuts = Vec::new();
     let mut offset = 0;

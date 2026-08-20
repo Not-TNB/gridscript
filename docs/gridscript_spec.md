@@ -45,7 +45,7 @@ All objects that "exist" in the program space are bound to the program space's d
 
 The program also has a buffer which can hold an arbitrary amount of data. Each datum can be any of the four types. It has an inherent "length" and thus behaves similarly to a list data structure. By default, values are added at the top and removed from the bottom (first-in-first-out); `TOP` is available as an explicit opt-in when a command needs last-in-first-out behavior instead.
 
-Finally, there are two methods of output and one method of input. The first is the program output, which is stdout. The second is the debug output, the visibility of which is determined by the program's metadata. When visible, it shows a live view of the Program Tracer's position and path through program space, along with a running log of every warning and exception thrown during execution. If it is visible, it should be as a GUI. If no GUI is available, it should simply be ignored. The input is stdin.
+Finally, there are two methods of output and one method of input. The first is the program output, which is StdOutput. The second is the debug output, the visibility of which is determined by the program's metadata. When visible, it shows a live view of the Program Tracer's position and path through program space, along with a running log of every warning and exception thrown during execution. If it is visible, it should be as a GUI. If no GUI is available, it should simply be ignored. The input is StdInput.
 
 ## PROGRAM EXECUTION
 
@@ -172,7 +172,8 @@ Divides variable1, or else the value at current position in the dataspace, by th
 Rearranges the buffer in a random order (from the shared seeded RNG)
 
 **CALL name [WITH ARGUMENTS arguments] [GIVING variable]**
-Calls the subroutine (more on this in the next section) with the specified name, using the specified list of arguments if applicable. Any return value will be stored to the specified variable, or else to the current position in the dataspace. Example: 'CALL FOO WITH ARGUMENTS "Foo" 17 GIVING foo'. If no value is returned, the dataspace should remain unmodified; but if storing to a variable instead and no value is returned, the variable should be set to NULL. An exception is thrown if more arguments are provided than the subroutine ever consumes via INPUT, or if fewer arguments are given than the subroutine requests. An exception is also thrown if the call would exceed `@maxdepth` active nested CALLs.
+An exception is thrown if fewer arguments are given than the subroutine requests. Extra arguments that the subroutine never consumes are ignored.
+Whether a given argument is consumed can depend on which branch the subroutine takes at runtime, so unconsumed arguments are not treated as an error.
 
 **SPLIT string [OVER separator]**
 Splits the specified STRING value into one or more substrings over the specified separator string, if applicable, or else over any whitespace characters. Then, pushes all of the resulting substrings to the buffer.
@@ -319,3 +320,7 @@ This grammar underlies `CALL ... WITH ARGUMENTS ...`, and every other command's 
 (17,1):CALL ACK WITH ARGUMENTS x z
 (19,1):RETURN
 ```
+
+## CHANGELOG
+
+CALL — removed the "too many arguments" exception. The original spec threw if a subroutine never consumed all the arguments passed to it. This makes an error condition depend on runtime control flow: a subroutine with an INPUT behind a SWITCH branch would accept two arguments on one input and throw on another, from an identical call site. The condition also can't be checked statically, only after the frame completes. Since GridScript is otherwise permissive (unassigned variables are NULL, failed casts warn, out-of-range buffer reads warn), extra arguments are now silently ignored. The complementary rule — throwing when a subroutine requests more inputs than were provided — is kept, since that failure is local, immediate, and unambiguous.
