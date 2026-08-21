@@ -9,6 +9,7 @@ use crate::parser::ast::{
 };
 use crate::program::Scope;
 use crate::types::{DataType, Value};
+use std::collections::VecDeque;
 
 /* ----------------------------------------------------------------------------------------------
  * INSTANCE & STEP OUTCOME STRUCT
@@ -46,6 +47,8 @@ pub enum StepOutcome {
         arguments: Vec<Value>,
         giving: Option<ValueExpr>,
     },
+    /// `GOTO` landed inside onr or more nodes; executed with priority
+    Jumped(Vec<usize>),
 }
 
 impl<'a> Instance<'a> {
@@ -275,8 +278,11 @@ impl Instance<'_> {
 
     /// Executes the commands at `indices` in file order, updating `last_node` as
     /// each is entered. Stops early if a command ends or suspends this frame.
+    /// A GOTO landing is executed next, ahead of the remaining branch
     fn execute_nodes(&mut self, indices: Vec<usize>, ctx: &mut RunContext) -> Result<StepOutcome> {
-        for index in indices {
+        let mut pending: VecDeque<usize> = indices.into();
+
+        while let Some(index) = pending.pop_front() {
             // an earlier command in this batch may have deleted the node
             let Some(node) = self.nodes.get(index) else {
                 continue;
@@ -286,6 +292,11 @@ impl Instance<'_> {
 
             match self.exec_command(&command, ctx)? {
                 StepOutcome::Continue => {}
+                StepOutcome::Jumped(landed) => {
+                    for idx in landed.into_iter().rev() {
+                        pending.push_front(idx);
+                    }
+                }
                 outcome => return Ok(outcome),
             }
         }
@@ -692,7 +703,11 @@ impl Instance<'_> {
             .map(|(i, _)| i)
             .collect();
 
-        self.execute_nodes(landed, ctx)
+        Ok(if landed.is_empty() {
+            StepOutcome::Continue
+        } else {
+            StepOutcome::Jumped(landed)
+        })
     }
 
     fn exec_load_file(

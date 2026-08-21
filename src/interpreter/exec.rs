@@ -50,7 +50,7 @@ fn run_instance(
                 arguments,
                 giving,
             } => {
-                if depth + 1 > program.max_depth {
+                if depth >= program.max_depth {
                     return Err(Error::MaxDepthExceeded(program.max_depth));
                 }
                 let Some(subroutine) = program.subroutines.get(&name) else {
@@ -68,6 +68,9 @@ fn run_instance(
                 };
                 instance.store_call_result(returned, &giving, ctx)?;
                 continue;
+            }
+            StepOutcome::Jumped(_) => {
+                unreachable!("Jumped is drained by execute_nodes; completed batch never yields one")
             }
         }
     }
