@@ -1,0 +1,9 @@
+#PRINT FILE.
+!! this will print out a file's contents given a path to that file.
+
+@width 6
+@height 1
+
+(1,1):START
+(3,1):INPUT TO path WITH PROMPT 'File path: '
+(5,1):PRINT FILE path
