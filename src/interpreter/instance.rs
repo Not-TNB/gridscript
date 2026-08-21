@@ -439,11 +439,19 @@ impl Instance<'_> {
                 let value = self.eval(expr, ctx)?;
                 !matches!(value.cast_to(DataType::Int), Some(Value::Int(n)) if n == data)
             }
+            SwitchCond::GreaterThan(expr) => {
+                let value = self.eval(expr, ctx)?;
+                matches!(value.cast_to(DataType::Int), Some(Value::Int(n)) if data > n)
+            }
+            SwitchCond::LessThan(expr) => {
+                let value = self.eval(expr, ctx)?;
+                matches!(value.cast_to(DataType::Int), Some(Value::Int(n)) if data < n)
+            }
         };
         if should_rotate {
             let cur_dir = i64::from(self.tracer.direction);
             self.tracer.set_direction(cur_dir + 90);
-        };
+        }
         Ok(StepOutcome::Continue)
     }
 

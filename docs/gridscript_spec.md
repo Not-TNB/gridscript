@@ -105,12 +105,18 @@ Declares a checkpoint marker with the specified id, located at the center of the
 **GOTO id|THIS CHECKPOINT**
 Teleports the program flow to the nearest checkpoint having the specified id, if one exists. If multiple such checkpoints are at equal distances, it chooses one at random (from the shared seeded RNG). Does not change the direction of the flow. If THIS CHECKPOINT is used, it uses the number at the current position in the Dataspace. If ID is a non-integer, or no such checkpoint exists, a warning is thrown and the tracer's position is unchanged.
 
-**SWITCH RANDOM|value|!value|=value|!=value**
-value: Rotates the direction of the program tracer 90 degrees clockwise if the specified value is or can be cast to TRUE, else leaves the direction of the program tracer unchanged
-!value: Rotates the direction of the program tracer 90 degrees clockwise if the specified value is or can be cast to FALSE, else leaves the direction of the program tracer unchanged
-=value: Rotates the direction of the program tracer 90 degrees clockwise if the current dataspace value equals the specified value, else leaves the direction of the program tracer unchanged
-!=value: Rotates the program tracer's direction 90 degrees clockwise if the current dataspace value does not equal the specified value, else leaves the direction of the program tracer unchanged
-RANDOM: Has a 50% chance of rotating the program tracer's direction 90 degrees clockwise, else leaves the direction of the program tracer unchanged
+**SWITCH RANDOM|value|!value|=value|!=value|>value|<value**
+`value`: Rotates the direction of the program tracer 90 degrees clockwise if the specified value is or can be cast to TRUE, else leaves the direction of the program tracer unchanged
+`!value`: Rotates the direction of the program tracer 90 degrees clockwise if the specified value is or can be cast to FALSE, else leaves the direction of the program tracer unchanged
+`=value`: Rotates the direction of the program tracer 90 degrees clockwise if the current dataspace value equals the specified value, else leaves the direction of the program tracer unchanged
+`!=value`: Rotates the program tracer's direction 90 degrees clockwise if the current dataspace value does not equal the specified value, else leaves the direction of the program tracer unchanged
+`>value`: Rotates the direction of the program tracer 90 degrees clockwise if the
+current dataspace value is strictly greater than the specified value, else leaves
+the direction unchanged
+`<value`: Rotates the direction of the program tracer 90 degrees clockwise if the
+current dataspace value is strictly less than the specified value, else leaves the
+direction unchanged
+`RANDOM`: Has a 50% chance of rotating the program tracer's direction 90 degrees clockwise, else leaves the direction of the program tracer unchanged
 
 **STORE value|RANDOM [TO variable]**
 Stores the specified value to the specified variable, if applicable. Else, stores it at the current dataspace value. If RANDOM is used, a random floating point number between 0 and 1 (including 0, but not 1) is used. The variable name may contain any combination of lowercase letters, underscores, and digits, of which the first character may not be a digit.

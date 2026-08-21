@@ -137,3 +137,23 @@ fn handles_windows_line_endings() {
         ]
     );
 }
+
+#[test]
+fn comparison_operators() {
+    assert_eq!(
+        tokenize("SWITCH >5").unwrap(),
+        vec![
+            Token::Keyword(Keyword::Switch),
+            Token::GreaterThan,
+            Token::IntLiteral(5)
+        ]
+    );
+    assert_eq!(
+        tokenize("SWITCH <-5").unwrap(),
+        vec![
+            Token::Keyword(Keyword::Switch),
+            Token::LessThan,
+            Token::IntLiteral(-5)
+        ]
+    );
+}

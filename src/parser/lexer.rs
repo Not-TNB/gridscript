@@ -20,6 +20,8 @@ pub enum Token {
     Equals,
     Bang,
     BangEquals,
+    GreaterThan,
+    LessThan,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, EnumString)]
@@ -204,6 +206,21 @@ fn scan_bang(chars: &mut Peekable<Chars>) -> Option<Token> {
     }
 }
 
+fn single_char_token(c: char) -> Option<Token> {
+    Some(match c {
+        '\n' => Token::Newline,
+        ',' => Token::Comma,
+        ':' => Token::Colon,
+        '(' => Token::LParen,
+        ')' => Token::RParen,
+        '@' => Token::At,
+        '=' => Token::Equals,
+        '>' => Token::GreaterThan,
+        '<' => Token::LessThan,
+        _ => return None,
+    })
+}
+
 pub fn tokenize(source: &str) -> Result<Vec<Token>> {
     let mut chars = source.chars().peekable();
     let mut tokens: Vec<Token> = Vec::new();
@@ -213,32 +230,8 @@ pub fn tokenize(source: &str) -> Result<Vec<Token>> {
             ' ' | '\t' | '\r' => {
                 chars.next();
             }
-            '\n' => {
-                tokens.push(Token::Newline);
-                chars.next();
-            }
-            ',' => {
-                tokens.push(Token::Comma);
-                chars.next();
-            }
-            ':' => {
-                tokens.push(Token::Colon);
-                chars.next();
-            }
-            '(' => {
-                tokens.push(Token::LParen);
-                chars.next();
-            }
-            ')' => {
-                tokens.push(Token::RParen);
-                chars.next();
-            }
-            '@' => {
-                tokens.push(Token::At);
-                chars.next();
-            }
-            '=' => {
-                tokens.push(Token::Equals);
+            _ if let Some(t) = single_char_token(c) => {
+                tokens.push(t);
                 chars.next();
             }
             '\'' => {

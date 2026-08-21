@@ -76,10 +76,12 @@ pub enum GoTarget {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SwitchCond {
     Random,
-    Truthy(ValueExpr),    // SWITCH value
-    Falsy(ValueExpr),     // SWITCH !value
-    Equals(ValueExpr),    // SWITCH =value
-    NotEquals(ValueExpr), // SWITCH !=value
+    Truthy(ValueExpr),      // SWITCH value
+    Falsy(ValueExpr),       // SWITCH !value
+    Equals(ValueExpr),      // SWITCH =value
+    NotEquals(ValueExpr),   // SWITCH !=value
+    GreaterThan(ValueExpr), // SWITCH >value
+    LessThan(ValueExpr),    // SWITCH <value
 }
 
 #[derive(Debug, Clone, PartialEq)]

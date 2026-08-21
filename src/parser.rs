@@ -496,6 +496,14 @@ impl Parser<'_> {
                 self.advance();
                 SwitchCond::NotEquals
             }
+            Some(Token::GreaterThan) => {
+                self.advance();
+                SwitchCond::GreaterThan
+            }
+            Some(Token::LessThan) => {
+                self.advance();
+                SwitchCond::LessThan
+            }
             _ => SwitchCond::Truthy,
         };
 
