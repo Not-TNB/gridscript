@@ -12,8 +12,7 @@ Control flow is literally geometry: you steer the tracer around the plane.
 This repository is a from-scratch Rust interpreter for the language. It is a
 personal learning project, not a production tool.
 
-The layout explains itself faster than prose, so here is Hello World
-(`examples/hello_world.gridscript`):
+The following is a Hello World program:
 
 ```
 #HELLO WORLD.
