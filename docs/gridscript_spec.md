@@ -37,7 +37,14 @@ The dataspace is a simple grid with dimensions supplied in the program metadata.
 
 The program space, however, is not strictly a grid, but rather a continuous space with the precision of 32-bit floats, with dimensions again specified in the program metadata, in which the Program Tracer lives. The Program Tracer has an inherent position, consisting of an X-coordinate and a Y-coordinate which are 32-bit floats. It also has a direction, specified by an integer from 0 to 359 inclusive. The program tracer begins at the center of the node with command START and with direction 0.
 
-The program space is inhabited by a number of *nodes*, which are open discs centered at integral positions. The radius of these circles is provided by a parameter in the program metadata described below. Each node is associated with a command. If the Program Tracer enters one of these nodes, the command associated with that node is executed, then the program tracer exits the node in its current direction and continues until it reaches another node or the edge of the program space. A list of commands is specified in a later section.
+The program space is inhabited by a number of *nodes*, which are open discs
+centered at integral positions. The radius of these discs is provided by a
+parameter in the program metadata described below. A point lies inside a node
+if its distance from that node's center is *strictly* less than the radius; a
+point at exactly the radius is outside. At the default radius of 1, nodes on
+adjacent integral coordinates are exactly tangent, and the single point they
+share therefore belongs to neither — a tracer passing through it triggers
+neither node.
 
 The program space also contains *checkpoints*, which are found at integral positions just like nodes and are declared using the same `(x,y):CHECKPOINT id` syntax. A checkpoint is a static marker, not a node: it is recorded at load time, has no radius, is never "entered" by the Program Tracer, and never triggers execution of anything. It exists purely as a labeled coordinate for `GOTO` to target, and is available to `GOTO` from the very start of the program regardless of whether the tracer has ever passed near it. Each checkpoint has an inherent ID, which is a nonnegative integer. Multiple checkpoints may share an id, in which case `GOTO` picks the nearest one (see the GOTO command).
 
@@ -176,7 +183,21 @@ An exception is thrown if fewer arguments are given than the subroutine requests
 Whether a given argument is consumed can depend on which branch the subroutine takes at runtime, so unconsumed arguments are not treated as an error.
 
 **SPLIT string [OVER separator]**
-Splits the specified STRING value into one or more substrings over the specified separator string, if applicable, or else over any whitespace characters. Then, pushes all of the resulting substrings to the buffer.
+Splits the specified STRING value into substrings and pushes all of them to the
+buffer, in order.
+
+If no OVER clause is given, the split is over runs of whitespace, and empty
+substrings are discarded.
+
+If OVER is given with a non-empty separator, the string is split at each
+occurrence of that separator. Empty substrings arising between adjacent
+separators are kept and pushed.
+
+If OVER is given with an explicitly empty separator, the string is exploded into
+its individual characters. This is distinct from omitting OVER entirely: the
+programmer has asked to split over nothing, and it is the only route to a
+string's length in the language. Exploding the empty string yields no
+substrings and leaves the buffer unchanged.
 
 **THROW message**
 Throws an exception with the specified message.
@@ -320,7 +341,3 @@ This grammar underlies `CALL ... WITH ARGUMENTS ...`, and every other command's 
 (17,1):CALL ACK WITH ARGUMENTS x z
 (19,1):RETURN
 ```
-
-## CHANGELOG
-
-CALL — removed the "too many arguments" exception. The original spec threw if a subroutine never consumed all the arguments passed to it. This makes an error condition depend on runtime control flow: a subroutine with an INPUT behind a SWITCH branch would accept two arguments on one input and throw on another, from an identical call site. The condition also can't be checked statically, only after the frame completes. Since GridScript is otherwise permissive (unassigned variables are NULL, failed casts warn, out-of-range buffer reads warn), extra arguments are now silently ignored. The complementary rule — throwing when a subroutine requests more inputs than were provided — is kept, since that failure is local, immediate, and unambiguous.
