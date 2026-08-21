@@ -7,10 +7,6 @@ GridScript is an esoteric programming language designed by
 statements, a GridScript program is a set of **commands placed at coordinates in a
 2D space**. A *program tracer* enters at the `START` node, moves in a direction,
 and executes whatever nodes it passes through — stopping when it leaves the grid.
-Control flow is literally geometry: you steer the tracer around the plane.
-
-This repository is a from-scratch Rust interpreter for the language. It is a
-personal learning project, not a production tool.
 
 The following is a Hello World program:
 
